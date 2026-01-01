@@ -15828,3 +15828,1767 @@ All major CGO & Governance components migrated:
 
 ---
 
+## Phase 6: Stablecoin Domain
+
+**Duration:** Weeks 12-15 (4 weeks)
+**Goal:** Implement algorithmic stablecoin with collateralization, reserve management, and price stability mechanisms
+**Dependencies:** Phase 2 (Account), Phase 3 (Payment), Phase 7 (Treasury)
+
+**PHP Reference:**
+- `app/Domain/Stablecoin/` (96 files) - Minting, burning, reserves, oracles, collateral
+
+---
+
+### Task 6.1: Stablecoin Value Objects
+
+**Task ID:** P6-STABLECOIN-001
+
+**Description:** Implement stablecoin value objects and collateral models
+
+**Priority:** Critical
+
+**Estimated Complexity:** M (8h)
+
+**Dependencies:**
+- P1-SHARED-001 (Money)
+
+**Acceptance Criteria:**
+- [ ] StablecoinType enum (Fiat-Backed, Crypto-Backed, Algorithmic)
+- [ ] CollateralType enum (USD, EUR, BTC, ETH, USDT, USDC)
+- [ ] CollateralizationRatio value object (with safe/liquidation thresholds)
+- [ ] MintingFee value object
+- [ ] RedemptionFee value object
+- [ ] StabilityMechanism enum (Rebase, Dual-Token, Algorithmic)
+- [ ] Unit tests (>90% coverage)
+
+**Files to Create:**
+```
+internal/domain/stablecoin/valueobject/stablecoin_type.go
+internal/domain/stablecoin/valueobject/collateral_type.go
+internal/domain/stablecoin/valueobject/collateralization_ratio.go
+internal/domain/stablecoin/valueobject/fees.go
+internal/domain/stablecoin/valueobject/valueobject_test.go
+```
+
+**Implementation Steps:**
+
+```go
+package valueobject
+
+import (
+    "fmt"
+    "github.com/shopspring/decimal"
+)
+
+type CollateralizationRatio struct {
+    current      decimal.Decimal
+    safe         decimal.Decimal // e.g., 150%
+    liquidation  decimal.Decimal // e.g., 120%
+    target       decimal.Decimal // e.g., 200%
+}
+
+func NewCollateralizationRatio(
+    current, safe, liquidation, target decimal.Decimal,
+) (*CollateralizationRatio, error) {
+    if liquidation.GreaterThanOrEqual(safe) {
+        return nil, fmt.Errorf("liquidation ratio must be less than safe ratio")
+    }
+
+    if safe.GreaterThanOrEqual(target) {
+        return nil, fmt.Errorf("safe ratio must be less than target ratio")
+    }
+
+    return &CollateralizationRatio{
+        current:     current,
+        safe:        safe,
+        liquidation: liquidation,
+        target:      target,
+    }, nil
+}
+
+func (cr *CollateralizationRatio) IsHealthy() bool {
+    return cr.current.GreaterThanOrEqual(cr.safe)
+}
+
+func (cr *CollateralizationRatio) RequiresMarginCall() bool {
+    return cr.current.LessThan(cr.safe) && cr.current.GreaterThanOrEqual(cr.liquidation)
+}
+
+func (cr *CollateralizationRatio) RequiresLiquidation() bool {
+    return cr.current.LessThan(cr.liquidation)
+}
+
+func (cr *CollateralizationRatio) DistanceToLiquidation() decimal.Decimal {
+    return cr.current.Sub(cr.liquidation)
+}
+
+type CollateralType string
+
+const (
+    CollateralTypeUSD  CollateralType = "USD"
+    CollateralTypeEUR  CollateralType = "EUR"
+    CollateralTypeBTC  CollateralType = "BTC"
+    CollateralTypeETH  CollateralType = "ETH"
+    CollateralTypeUSDT CollateralType = "USDT"
+    CollateralTypeUSDC CollateralType = "USDC"
+)
+
+func (ct CollateralType) IsStable() bool {
+    return ct == CollateralTypeUSD ||
+           ct == CollateralTypeEUR ||
+           ct == CollateralTypeUSDT ||
+           ct == CollateralTypeUSDC
+}
+
+func (ct CollateralType) DefaultCollateralizationRatio() decimal.Decimal {
+    if ct.IsStable() {
+        return decimal.NewFromFloat(1.1) // 110% for stablecoins
+    }
+    return decimal.NewFromFloat(1.5) // 150% for volatile assets
+}
+```
+
+**PHP Reference:**
+- `app/Domain/Stablecoin/ValueObjects/`
+
+---
+
+### Task 6.2: Stablecoin Aggregate
+
+**Task ID:** P6-STABLECOIN-002
+
+**Description:** Implement stablecoin aggregate with minting and burning lifecycle
+
+**Priority:** Critical
+
+**Estimated Complexity:** L (16h)
+
+**Dependencies:**
+- P0-INFRA-001 (Event Horizon)
+- P6-STABLECOIN-001
+
+**Acceptance Criteria:**
+- [ ] StablecoinAggregate with Event Horizon
+- [ ] Events: StablecoinMinted, StablecoinBurned, StablecoinTransferred
+- [ ] Minting with collateral validation
+- [ ] Burning with reserve release
+- [ ] Total supply tracking
+- [ ] Minting/burning fees
+- [ ] Unit tests (>90% coverage)
+
+**Files to Create:**
+```
+internal/domain/stablecoin/aggregate/stablecoin_aggregate.go
+internal/domain/stablecoin/event/stablecoin_events.go
+internal/domain/stablecoin/repository/stablecoin_repository.go
+internal/domain/stablecoin/aggregate/stablecoin_test.go
+```
+
+**Implementation:** Event-sourced stablecoin with supply management.
+
+**PHP Reference:**
+- `app/Domain/Stablecoin/Aggregates/StablecoinAggregate.php`
+- `app/Domain/Stablecoin/Events/Stablecoin*.php`
+
+---
+
+### Task 6.3: Collateral Management
+
+**Task ID:** P6-STABLECOIN-003
+
+**Description:** Collateral position management with liquidation engine
+
+**Priority:** Critical
+
+**Estimated Complexity:** L (16h)
+
+**Dependencies:**
+- P6-STABLECOIN-002
+
+**Acceptance Criteria:**
+- [ ] CollateralAggregate with position tracking
+- [ ] Events: CollateralAdded, CollateralWithdrawn, CollateralLiquidated, MarginCallIssued
+- [ ] Health check calculations
+- [ ] Automatic margin call detection
+- [ ] Liquidation engine with auctions
+- [ ] Partial liquidations
+- [ ] Unit tests (>90% coverage)
+
+**Files to Create:**
+```
+internal/domain/stablecoin/aggregate/collateral_aggregate.go
+internal/domain/stablecoin/event/collateral_events.go
+internal/domain/stablecoin/service/liquidation_engine.go
+internal/domain/stablecoin/service/health_checker.go
+```
+
+**Implementation Steps:**
+
+```go
+type CollateralAggregate struct {
+    *events.AggregateBase
+
+    positionID         string
+    userID             string
+    collateralType     CollateralType
+    collateralAmount   decimal.Decimal
+    lockedCollateral   decimal.Decimal
+    mintedStablecoins  decimal.Decimal
+    healthFactor       decimal.Decimal
+    lastHealthCheck    time.Time
+    status             CollateralStatus
+}
+
+func (a *CollateralAggregate) AddCollateral(
+    amount decimal.Decimal,
+    collateralType CollateralType,
+) error {
+    if amount.LessThanOrEqual(decimal.Zero) {
+        return fmt.Errorf("amount must be positive")
+    }
+
+    a.AppendEvent(&CollateralAdded{
+        PositionID:     a.positionID,
+        UserID:         a.userID,
+        Amount:         amount,
+        CollateralType: collateralType,
+        AddedAt:        time.Now(),
+    }, time.Now())
+
+    return nil
+}
+
+func (a *CollateralAggregate) CheckHealth(
+    oraclePrice decimal.Decimal,
+    requiredRatio decimal.Decimal,
+) error {
+    collateralValue := a.collateralAmount.Mul(oraclePrice)
+    healthFactor := collateralValue.Div(a.mintedStablecoins)
+
+    a.AppendEvent(&CollateralHealthChecked{
+        PositionID:      a.positionID,
+        HealthFactor:    healthFactor,
+        CollateralValue: collateralValue,
+        DebtValue:       a.mintedStablecoins,
+        CheckedAt:       time.Now(),
+    }, time.Now())
+
+    // Issue margin call if below safe ratio
+    if healthFactor.LessThan(requiredRatio) {
+        a.AppendEvent(&MarginCallIssued{
+            PositionID:   a.positionID,
+            UserID:       a.userID,
+            HealthFactor: healthFactor,
+            RequiredRatio: requiredRatio,
+            IssuedAt:     time.Now(),
+        }, time.Now())
+    }
+
+    return nil
+}
+
+func (a *CollateralAggregate) Liquidate(
+    liquidationPrice decimal.Decimal,
+    liquidator string,
+) error {
+    if a.status != CollateralStatusUnderwater {
+        return fmt.Errorf("position not eligible for liquidation")
+    }
+
+    collateralValue := a.collateralAmount.Mul(liquidationPrice)
+
+    // Calculate liquidation penalty (e.g., 10%)
+    penalty := collateralValue.Mul(decimal.NewFromFloat(0.1))
+    liquidatorReward := penalty.Mul(decimal.NewFromFloat(0.05))
+
+    a.AppendEvent(&CollateralLiquidated{
+        PositionID:        a.positionID,
+        UserID:            a.userID,
+        Liquidator:        liquidator,
+        CollateralAmount:  a.collateralAmount,
+        DebtRepaid:        a.mintedStablecoins,
+        Penalty:           penalty,
+        LiquidatorReward:  liquidatorReward,
+        LiquidatedAt:      time.Now(),
+    }, time.Now())
+
+    return nil
+}
+```
+
+**PHP Reference:**
+- `app/Domain/Stablecoin/Aggregates/CollateralAggregate.php`
+- `app/Domain/Stablecoin/Events/Collateral*.php`
+
+---
+
+### Task 6.4: Reserve Management
+
+**Task ID:** P6-STABLECOIN-004
+
+**Description:** Reserve pool management with automatic rebalancing
+
+**Priority:** Critical
+
+**Estimated Complexity:** L (14h)
+
+**Dependencies:**
+- P6-STABLECOIN-002
+- P7-TREASURY-001 (Portfolio Management)
+
+**Acceptance Criteria:**
+- [ ] ReserveAggregate with multi-asset reserves
+- [ ] Events: ReserveDeposited, ReserveWithdrawn, ReserveRebalanced
+- [ ] Target allocation strategy
+- [ ] Automatic rebalancing workflow
+- [ ] Yield optimization
+- [ ] Reserve ratio monitoring
+- [ ] Unit tests (>90% coverage)
+
+**Files to Create:**
+```
+internal/domain/stablecoin/aggregate/reserve_aggregate.go
+internal/domain/stablecoin/event/reserve_events.go
+internal/domain/stablecoin/service/reserve_manager.go
+internal/domain/stablecoin/workflow/rebalancing_workflow.go
+```
+
+**Implementation:** Reserve management with Treasury integration.
+
+**PHP Reference:**
+- `app/Domain/Stablecoin/Aggregates/ReserveAggregate.php`
+- `app/Domain/Stablecoin/Workflows/RebalancingWorkflow.php`
+
+---
+
+### Task 6.5: Price Oracle Service
+
+**Task ID:** P6-STABLECOIN-005
+
+**Description:** Multi-source price oracle with deviation detection
+
+**Priority:** Critical
+
+**Estimated Complexity:** L (14h)
+
+**Dependencies:**
+- P6-STABLECOIN-001
+
+**Acceptance Criteria:**
+- [ ] OracleService with multiple price feeds
+- [ ] Chainlink integration
+- [ ] Price aggregation (median, average)
+- [ ] Deviation detection and alerts
+- [ ] Fallback mechanisms
+- [ ] Price caching with TTL
+- [ ] Circuit breaker for extreme deviations
+- [ ] Unit tests (>85% coverage)
+
+**Files to Create:**
+```
+internal/domain/stablecoin/service/oracle_service.go
+internal/domain/stablecoin/service/chainlink_oracle.go
+internal/domain/stablecoin/service/price_aggregator.go
+internal/domain/stablecoin/service/deviation_detector.go
+```
+
+**Implementation Steps:**
+
+```go
+type OracleService struct {
+    feeds          []PriceFeed
+    aggregator     *PriceAggregator
+    cache          cache.Cache
+    maxDeviation   decimal.Decimal
+    circuitBreaker *CircuitBreaker
+}
+
+func (os *OracleService) GetPrice(asset string) (decimal.Decimal, error) {
+    // Check cache first
+    if cached, err := os.cache.Get(fmt.Sprintf("price:%s", asset)); err == nil {
+        return decimal.NewFromString(cached)
+    }
+
+    // Fetch from multiple sources
+    var prices []decimal.Decimal
+    for _, feed := range os.feeds {
+        price, err := feed.GetPrice(asset)
+        if err != nil {
+            log.Printf("Feed %s failed: %v", feed.Name(), err)
+            continue
+        }
+        prices = append(prices, price)
+    }
+
+    if len(prices) == 0 {
+        return decimal.Zero, fmt.Errorf("no price feeds available")
+    }
+
+    // Aggregate prices (median to avoid outliers)
+    aggregatedPrice := os.aggregator.MedianPrice(prices)
+
+    // Check for extreme deviations
+    if os.hasExtremeDeviation(prices, aggregatedPrice) {
+        return decimal.Zero, fmt.Errorf("extreme price deviation detected")
+    }
+
+    // Cache result
+    os.cache.Set(
+        fmt.Sprintf("price:%s", asset),
+        aggregatedPrice.String(),
+        30*time.Second,
+    )
+
+    return aggregatedPrice, nil
+}
+
+func (os *OracleService) hasExtremeDeviation(
+    prices []decimal.Decimal,
+    median decimal.Decimal,
+) bool {
+    for _, price := range prices {
+        deviation := price.Sub(median).Abs().Div(median)
+        if deviation.GreaterThan(os.maxDeviation) {
+            return true
+        }
+    }
+    return false
+}
+```
+
+**PHP Reference:**
+- `app/Domain/Stablecoin/Services/OracleService.php`
+- `app/Domain/Stablecoin/Oracles/`
+
+---
+
+### Task 6.6: Stability Mechanism Service
+
+**Task ID:** P6-STABLECOIN-006
+
+**Description:** Algorithmic stability mechanisms for peg maintenance
+
+**Priority:** High
+
+**Estimated Complexity:** L (16h)
+
+**Dependencies:**
+- P6-STABLECOIN-004
+- P6-STABLECOIN-005
+
+**Acceptance Criteria:**
+- [ ] StabilityMechanism service
+- [ ] Peg monitoring
+- [ ] Automatic interventions (rebase, buy/sell)
+- [ ] Emergency pause mechanism
+- [ ] Arbitrage opportunity detection
+- [ ] Incentive mechanisms
+- [ ] Unit tests (>85% coverage)
+
+**Files to Create:**
+```
+internal/domain/stablecoin/service/stability_mechanism.go
+internal/domain/stablecoin/service/peg_monitor.go
+internal/domain/stablecoin/service/arbitrage_detector.go
+```
+
+**Implementation:** Algorithmic peg maintenance with automatic interventions.
+
+---
+
+### Task 6.7: Minting Workflow
+
+**Task ID:** P6-STABLECOIN-007
+
+**Description:** Temporal workflow for stablecoin minting with compliance checks
+
+**Priority:** Critical
+
+**Estimated Complexity:** M (12h)
+
+**Dependencies:**
+- P0-INFRA-003 (Temporal)
+- P4-COMPLIANCE-001 (KYC)
+- P6-STABLECOIN-002
+
+**Acceptance Criteria:**
+- [ ] MintingWorkflow with Temporal
+- [ ] Compliance checks (KYC/AML)
+- [ ] Collateral verification
+- [ ] Oracle price validation
+- [ ] Minting execution
+- [ ] Fee collection
+- [ ] Unit tests (>85% coverage)
+
+**Files to Create:**
+```
+internal/domain/stablecoin/workflow/minting_workflow.go
+internal/domain/stablecoin/workflow/redemption_workflow.go
+internal/domain/stablecoin/workflow/activities.go
+```
+
+**Implementation:** Complete minting/redemption workflows with compliance.
+
+**PHP Reference:**
+- `app/Domain/Stablecoin/Workflows/MintingWorkflow.php`
+- `app/Domain/Stablecoin/Workflows/RedemptionWorkflow.php`
+
+---
+
+### Task 6.8: Stablecoin Projections & Projectors
+
+**Task ID:** P6-STABLECOIN-008
+
+**Description:** Projection models and projectors for stablecoin domain
+
+**Priority:** High
+
+**Estimated Complexity:** M (10h)
+
+**Dependencies:**
+- P6-STABLECOIN-002
+
+**Acceptance Criteria:**
+- [ ] Stablecoin projection (supply, circulation)
+- [ ] Collateral position projection
+- [ ] Reserve projection
+- [ ] Transaction history projection
+- [ ] Projectors for all aggregates
+- [ ] GORM models with indexes
+
+**Files to Create:**
+```
+internal/domain/stablecoin/projection/stablecoin.go
+internal/domain/stablecoin/projection/collateral_position.go
+internal/domain/stablecoin/projection/reserve.go
+internal/domain/stablecoin/projector/stablecoin_projector.go
+```
+
+---
+
+### Task 6.9: Stablecoin CQRS
+
+**Task ID:** P6-STABLECOIN-009
+
+**Description:** CQRS commands and queries for stablecoin operations
+
+**Priority:** Critical
+
+**Estimated Complexity:** M (10h)
+
+**Dependencies:**
+- P0-INFRA-002 (CQRS Bus)
+- P6-STABLECOIN-008
+
+**Acceptance Criteria:**
+- [ ] Commands: MintStablecoin, BurnStablecoin, AddCollateral, WithdrawCollateral
+- [ ] Queries: GetSupply, GetCollateralPositions, GetReserveStatus, GetOraclePrice
+- [ ] Command handlers with validation
+- [ ] Query handlers with caching
+- [ ] Unit tests (>90% coverage)
+
+**Files to Create:**
+```
+internal/domain/stablecoin/command/commands.go
+internal/domain/stablecoin/command/handlers.go
+internal/domain/stablecoin/query/queries.go
+internal/domain/stablecoin/query/handlers.go
+```
+
+---
+
+### Task 6.10: Stablecoin REST API
+
+**Task ID:** P6-STABLECOIN-010
+
+**Description:** REST API endpoints for stablecoin operations
+
+**Priority:** Critical
+
+**Estimated Complexity:** M (10h)
+
+**Dependencies:**
+- P6-STABLECOIN-009
+
+**Acceptance Criteria:**
+- [ ] POST /api/v1/stablecoins/mint
+- [ ] POST /api/v1/stablecoins/burn
+- [ ] POST /api/v1/stablecoins/collateral/add
+- [ ] POST /api/v1/stablecoins/collateral/withdraw
+- [ ] GET /api/v1/stablecoins/supply
+- [ ] GET /api/v1/stablecoins/positions
+- [ ] GET /api/v1/stablecoins/oracle/prices
+- [ ] OpenAPI documentation
+- [ ] Unit tests (>85% coverage)
+
+**Files to Create:**
+```
+internal/http/handler/stablecoin_handler.go
+internal/http/dto/stablecoin_dto.go
+api/openapi/stablecoin.yaml
+```
+
+---
+
+### Task 6.11: Stablecoin Testing & Documentation
+
+**Task ID:** P6-STABLECOIN-011
+
+**Description:** Integration tests and documentation for stablecoin domain
+
+**Priority:** High
+
+**Estimated Complexity:** M (10h)
+
+**Dependencies:**
+- P6-STABLECOIN-010
+
+**Acceptance Criteria:**
+- [ ] Integration tests for minting/burning flow
+- [ ] Liquidation simulation tests
+- [ ] Reserve rebalancing tests
+- [ ] Oracle deviation tests
+- [ ] Documentation
+- [ ] Test coverage >85%
+
+**Files to Create:**
+```
+test/integration/stablecoin_test.go
+test/integration/liquidation_test.go
+docs/stablecoin/architecture.md
+docs/stablecoin/collateral-management.md
+```
+
+---
+
+## Phase 8: Lending Domain
+
+**Duration:** Weeks 16-20 (5 weeks)
+**Goal:** Implement P2P lending platform with credit scoring, loan origination, and collection management
+**Dependencies:** Phase 2 (Account), Phase 3 (Payment), Phase 4 (Compliance)
+
+**PHP Reference:**
+- `app/Domain/Lending/` (48 files) - Loan applications, credit scoring, repayments, collections
+
+---
+
+### Task 8.1: Lending Value Objects
+
+**Task ID:** P8-LENDING-001
+
+**Description:** Implement lending value objects and credit models
+
+**Priority:** Critical
+
+**Estimated Complexity:** M (8h)
+
+**Dependencies:**
+- P1-SHARED-001 (Money)
+
+**Acceptance Criteria:**
+- [ ] LoanStatus enum (Pending, Approved, Disbursed, Active, PaidOff, Defaulted, WrittenOff)
+- [ ] LoanPurpose enum (Personal, Business, Education, Auto, Mortgage)
+- [ ] CreditRating enum (Excellent, Good, Fair, Poor, VeryPoor)
+- [ ] RepaymentFrequency enum (Weekly, BiWeekly, Monthly, Quarterly)
+- [ ] InterestRate value object with APR calculation
+- [ ] LoanTerm value object
+- [ ] CreditScore value object (300-850 range)
+- [ ] Unit tests (>90% coverage)
+
+**Files to Create:**
+```
+internal/domain/lending/valueobject/loan_status.go
+internal/domain/lending/valueobject/credit_rating.go
+internal/domain/lending/valueobject/interest_rate.go
+internal/domain/lending/valueobject/credit_score.go
+internal/domain/lending/valueobject/valueobject_test.go
+```
+
+**Implementation Steps:**
+
+```go
+type CreditScore struct {
+    score int
+}
+
+func NewCreditScore(score int) (*CreditScore, error) {
+    if score < 300 || score > 850 {
+        return nil, fmt.Errorf("credit score must be between 300 and 850")
+    }
+
+    return &CreditScore{score: score}, nil
+}
+
+func (cs *CreditScore) Score() int {
+    return cs.score
+}
+
+func (cs *CreditScore) Rating() CreditRating {
+    switch {
+    case cs.score >= 750:
+        return CreditRatingExcellent
+    case cs.score >= 700:
+        return CreditRatingGood
+    case cs.score >= 650:
+        return CreditRatingFair
+    case cs.score >= 600:
+        return CreditRatingPoor
+    default:
+        return CreditRatingVeryPoor
+    }
+}
+
+func (cs *CreditScore) ApprovedInterestRate() decimal.Decimal {
+    switch cs.Rating() {
+    case CreditRatingExcellent:
+        return decimal.NewFromFloat(0.05) // 5% APR
+    case CreditRatingGood:
+        return decimal.NewFromFloat(0.08) // 8% APR
+    case CreditRatingFair:
+        return decimal.NewFromFloat(0.12) // 12% APR
+    case CreditRatingPoor:
+        return decimal.NewFromFloat(0.18) // 18% APR
+    default:
+        return decimal.NewFromFloat(0.25) // 25% APR
+    }
+}
+
+type InterestRate struct {
+    rate   decimal.Decimal // Annual percentage rate
+    isFixed bool
+}
+
+func (ir *InterestRate) CalculateMonthlyPayment(
+    principal decimal.Decimal,
+    termMonths int,
+) decimal.Decimal {
+    monthlyRate := ir.rate.Div(decimal.NewFromInt(12))
+
+    // PMT = P * [r(1+r)^n] / [(1+r)^n - 1]
+    onePlusR := decimal.NewFromInt(1).Add(monthlyRate)
+    power := onePlusR.Pow(decimal.NewFromInt(int64(termMonths)))
+
+    numerator := principal.Mul(monthlyRate).Mul(power)
+    denominator := power.Sub(decimal.NewFromInt(1))
+
+    return numerator.Div(denominator)
+}
+```
+
+**PHP Reference:**
+- `app/Domain/Lending/ValueObjects/`
+- `app/Domain/Lending/Enums/`
+
+---
+
+### Task 8.2: Loan Application Aggregate
+
+**Task ID:** P8-LENDING-002
+
+**Description:** Loan application aggregate with approval workflow
+
+**Priority:** Critical
+
+**Estimated Complexity:** L (16h)
+
+**Dependencies:**
+- P0-INFRA-001 (Event Horizon)
+- P8-LENDING-001
+
+**Acceptance Criteria:**
+- [ ] LoanApplicationAggregate with Event Horizon
+- [ ] Events: ApplicationSubmitted, CreditCheckCompleted, ApplicationApproved, ApplicationRejected
+- [ ] Application validation
+- [ ] Credit check integration
+- [ ] Risk assessment
+- [ ] Approval/rejection logic
+- [ ] Unit tests (>90% coverage)
+
+**Files to Create:**
+```
+internal/domain/lending/aggregate/loan_application_aggregate.go
+internal/domain/lending/event/application_events.go
+internal/domain/lending/repository/application_repository.go
+```
+
+**Implementation:** Event-sourced loan application lifecycle.
+
+**PHP Reference:**
+- `app/Domain/Lending/Aggregates/LoanApplicationAggregate.php`
+- `app/Domain/Lending/Events/LoanApplication*.php`
+
+---
+
+### Task 8.3: Loan Aggregate
+
+**Task ID:** P8-LENDING-003
+
+**Description:** Active loan aggregate with repayment tracking
+
+**Priority:** Critical
+
+**Estimated Complexity:** L (16h)
+
+**Dependencies:**
+- P8-LENDING-002
+
+**Acceptance Criteria:**
+- [ ] LoanAggregate with Event Horizon
+- [ ] Events: LoanDisbursed, RepaymentReceived, LoanFullyRepaid, LoanDefaulted, LoanRestructured
+- [ ] Amortization schedule generation
+- [ ] Interest accrual
+- [ ] Late fee calculation
+- [ ] Early repayment handling
+- [ ] Unit tests (>90% coverage)
+
+**Files to Create:**
+```
+internal/domain/lending/aggregate/loan_aggregate.go
+internal/domain/lending/event/loan_events.go
+internal/domain/lending/service/amortization_service.go
+```
+
+**Implementation:** Event-sourced loan lifecycle with repayment tracking.
+
+**PHP Reference:**
+- `app/Domain/Lending/Aggregates/LoanAggregate.php`
+- `app/Domain/Lending/Events/Loan*.php`
+
+---
+
+### Task 8.4: Credit Scoring Service
+
+**Task ID:** P8-LENDING-004
+
+**Description:** Credit scoring engine with risk assessment
+
+**Priority:** Critical
+
+**Estimated Complexity:** L (16h)
+
+**Dependencies:**
+- P8-LENDING-001
+- P4-COMPLIANCE-001 (KYC)
+
+**Acceptance Criteria:**
+- [ ] CreditScoringService with multiple factors
+- [ ] Income verification
+- [ ] Employment history analysis
+- [ ] Existing debt calculation (DTI ratio)
+- [ ] Payment history evaluation
+- [ ] Credit bureau integration (mock/real)
+- [ ] Risk score calculation
+- [ ] Unit tests (>85% coverage)
+
+**Files to Create:**
+```
+internal/domain/lending/service/credit_scoring_service.go
+internal/domain/lending/service/risk_assessment_service.go
+internal/domain/lending/service/dti_calculator.go
+internal/domain/lending/service/credit_bureau_client.go
+```
+
+**Implementation Steps:**
+
+```go
+type CreditScoringService struct {
+    creditBureau CreditBureauClient
+    kycService   KYCService
+}
+
+type CreditScoreFactors struct {
+    PaymentHistory      int // 35% weight
+    AmountsOwed         int // 30% weight
+    CreditHistoryLength int // 15% weight
+    NewCredit           int // 10% weight
+    CreditMix           int // 10% weight
+}
+
+func (cs *CreditScoringService) CalculateCreditScore(
+    applicantID string,
+) (*CreditScore, error) {
+    // Get credit report from bureau
+    report, err := cs.creditBureau.GetCreditReport(applicantID)
+    if err != nil {
+        return nil, err
+    }
+
+    // Calculate each factor
+    factors := &CreditScoreFactors{
+        PaymentHistory:      cs.evaluatePaymentHistory(report),
+        AmountsOwed:         cs.evaluateDebt(report),
+        CreditHistoryLength: cs.evaluateCreditAge(report),
+        NewCredit:           cs.evaluateNewCredit(report),
+        CreditMix:           cs.evaluateCreditMix(report),
+    }
+
+    // Weighted calculation
+    score := (factors.PaymentHistory * 35) +
+             (factors.AmountsOwed * 30) +
+             (factors.CreditHistoryLength * 15) +
+             (factors.NewCredit * 10) +
+             (factors.CreditMix * 10)
+
+    // Normalize to 300-850 range
+    normalizedScore := 300 + (score * 550 / 100)
+
+    return NewCreditScore(normalizedScore)
+}
+
+func (cs *CreditScoringService) CalculateDTI(
+    monthlyIncome decimal.Decimal,
+    monthlyDebt decimal.Decimal,
+) decimal.Decimal {
+    if monthlyIncome.IsZero() {
+        return decimal.Zero
+    }
+
+    return monthlyDebt.Div(monthlyIncome).Mul(decimal.NewFromInt(100))
+}
+```
+
+**PHP Reference:**
+- `app/Domain/Lending/Services/CreditScoringService.php`
+- `app/Domain/Lending/Services/RiskAssessmentService.php`
+
+---
+
+### Task 8.5: Interest Calculation Service
+
+**Task ID:** P8-LENDING-005
+
+**Description:** Interest and amortization calculation service
+
+**Priority:** High
+
+**Estimated Complexity:** M (12h)
+
+**Dependencies:**
+- P8-LENDING-003
+
+**Acceptance Criteria:**
+- [ ] Amortization schedule generator
+- [ ] Simple interest calculation
+- [ ] Compound interest calculation
+- [ ] APR vs APY conversion
+- [ ] Early repayment calculations
+- [ ] Late fee calculation
+- [ ] Unit tests (>90% coverage)
+
+**Files to Create:**
+```
+internal/domain/lending/service/interest_calculator.go
+internal/domain/lending/service/amortization_generator.go
+internal/domain/lending/service/late_fee_calculator.go
+```
+
+**Implementation:** Complete interest and amortization calculations.
+
+---
+
+### Task 8.6: Collection Service
+
+**Task ID:** P8-LENDING-006
+
+**Description:** Automated collection management for overdue loans
+
+**Priority:** High
+
+**Estimated Complexity:** L (14h)
+
+**Dependencies:**
+- P8-LENDING-003
+
+**Acceptance Criteria:**
+- [ ] CollectionService with automation
+- [ ] Overdue loan detection
+- [ ] Reminder scheduling (email/SMS)
+- [ ] Escalation workflow
+- [ ] Collection case management
+- [ ] Write-off process
+- [ ] Unit tests (>85% coverage)
+
+**Files to Create:**
+```
+internal/domain/lending/service/collection_service.go
+internal/domain/lending/service/reminder_scheduler.go
+internal/domain/lending/workflow/collection_workflow.go
+```
+
+**Implementation:** Automated collection with escalation.
+
+**PHP Reference:**
+- `app/Domain/Lending/Services/CollectionService.php`
+- `app/Domain/Lending/Workflows/CollectionWorkflow.php`
+
+---
+
+### Task 8.7: Lending Workflows
+
+**Task ID:** P8-LENDING-007
+
+**Description:** Temporal workflows for loan processing
+
+**Priority:** Critical
+
+**Estimated Complexity:** L (16h)
+
+**Dependencies:**
+- P0-INFRA-003 (Temporal)
+- P8-LENDING-004
+
+**Acceptance Criteria:**
+- [ ] LoanApplicationWorkflow (submit → credit check → approve → disburse)
+- [ ] RepaymentProcessingWorkflow
+- [ ] CollectionWorkflow with escalation
+- [ ] LoanRestructuringWorkflow
+- [ ] Human approval tasks
+- [ ] Unit tests (>85% coverage)
+
+**Files to Create:**
+```
+internal/domain/lending/workflow/loan_application_workflow.go
+internal/domain/lending/workflow/disbursement_workflow.go
+internal/domain/lending/workflow/repayment_workflow.go
+internal/domain/lending/workflow/activities.go
+```
+
+**Implementation:** Complete loan processing workflows.
+
+**PHP Reference:**
+- `app/Domain/Lending/Workflows/LoanApplicationWorkflow.php`
+- `app/Domain/Lending/Workflows/LoanDisbursementWorkflow.php`
+
+---
+
+### Task 8.8: Lending Projections & Projectors
+
+**Task ID:** P8-LENDING-008
+
+**Description:** Projection models and projectors for lending domain
+
+**Priority:** High
+
+**Estimated Complexity:** M (10h)
+
+**Dependencies:**
+- P8-LENDING-003
+
+**Acceptance Criteria:**
+- [ ] Loan projection
+- [ ] LoanApplication projection
+- [ ] Repayment projection
+- [ ] AmortizationSchedule projection
+- [ ] Projectors for all aggregates
+- [ ] GORM models with indexes
+
+**Files to Create:**
+```
+internal/domain/lending/projection/loan.go
+internal/domain/lending/projection/application.go
+internal/domain/lending/projection/repayment.go
+internal/domain/lending/projector/loan_projector.go
+```
+
+---
+
+### Task 8.9: Lending CQRS
+
+**Task ID:** P8-LENDING-009
+
+**Description:** CQRS commands and queries for lending operations
+
+**Priority:** Critical
+
+**Estimated Complexity:** M (10h)
+
+**Dependencies:**
+- P0-INFRA-002 (CQRS Bus)
+- P8-LENDING-008
+
+**Acceptance Criteria:**
+- [ ] Commands: SubmitApplication, ApproveLoan, DisburseLoan, ProcessRepayment
+- [ ] Queries: GetLoans, GetApplications, GetRepaymentSchedule, GetCreditScore
+- [ ] Command handlers with validation
+- [ ] Query handlers
+- [ ] Unit tests (>90% coverage)
+
+**Files to Create:**
+```
+internal/domain/lending/command/commands.go
+internal/domain/lending/command/handlers.go
+internal/domain/lending/query/queries.go
+internal/domain/lending/query/handlers.go
+```
+
+---
+
+### Task 8.10: Lending REST API
+
+**Task ID:** P8-LENDING-010
+
+**Description:** REST API endpoints for lending operations
+
+**Priority:** Critical
+
+**Estimated Complexity:** M (10h)
+
+**Dependencies:**
+- P8-LENDING-009
+
+**Acceptance Criteria:**
+- [ ] POST /api/v1/loans/applications
+- [ ] GET /api/v1/loans/applications
+- [ ] POST /api/v1/loans/{id}/disburse
+- [ ] POST /api/v1/loans/{id}/repay
+- [ ] GET /api/v1/loans/{id}/schedule
+- [ ] GET /api/v1/loans/my-loans
+- [ ] OpenAPI documentation
+- [ ] Unit tests (>85% coverage)
+
+**Files to Create:**
+```
+internal/http/handler/lending_handler.go
+internal/http/dto/lending_dto.go
+api/openapi/lending.yaml
+```
+
+---
+
+### Task 8.11: Lending Testing & Documentation
+
+**Task ID:** P8-LENDING-011
+
+**Description:** Integration tests and documentation for lending domain
+
+**Priority:** High
+
+**Estimated Complexity:** M (10h)
+
+**Dependencies:**
+- P8-LENDING-010
+
+**Acceptance Criteria:**
+- [ ] Integration tests for loan application flow
+- [ ] Repayment processing tests
+- [ ] Collection workflow tests
+- [ ] Documentation
+- [ ] Test coverage >85%
+
+**Files to Create:**
+```
+test/integration/lending_test.go
+test/integration/credit_scoring_test.go
+docs/lending/loan-application-process.md
+docs/lending/credit-scoring.md
+```
+
+---
+
+## Phase 10: AI Domain
+
+**Duration:** Weeks 21-24 (4 weeks)
+**Goal:** Implement AI-powered financial insights, multi-agent coordination, and MCP integration
+**Dependencies:** Phase 2 (Account), Phase 5 (Exchange), Phase 7 (Treasury)
+
+**PHP Reference:**
+- `app/Domain/AI/` (75 files) - AI agents, conversations, MCP, multi-agent coordination
+
+---
+
+### Task 10.1: AI Value Objects & Models
+
+**Task ID:** P10-AI-001
+
+**Description:** AI conversation and agent value objects
+
+**Priority:** Critical
+
+**Estimated Complexity:** M (8h)
+
+**Dependencies:**
+- None
+
+**Acceptance Criteria:**
+- [ ] ConversationRole enum (User, Assistant, System)
+- [ ] AIProvider enum (Claude, OpenAI, Gemini, Local)
+- [ ] AgentRole enum (Analyst, Trader, Advisor, Researcher)
+- [ ] Message value object
+- [ ] ToolCall value object
+- [ ] TokenUsage value object
+- [ ] Unit tests (>90% coverage)
+
+**Files to Create:**
+```
+internal/domain/ai/valueobject/conversation_role.go
+internal/domain/ai/valueobject/ai_provider.go
+internal/domain/ai/valueobject/agent_role.go
+internal/domain/ai/valueobject/message.go
+internal/domain/ai/valueobject/valueobject_test.go
+```
+
+**Implementation Steps:**
+
+```go
+type Message struct {
+    id        string
+    role      ConversationRole
+    content   string
+    toolCalls []ToolCall
+    timestamp time.Time
+    tokens    int
+}
+
+func NewMessage(role ConversationRole, content string) *Message {
+    return &Message{
+        id:        uuid.New().String(),
+        role:      role,
+        content:   content,
+        timestamp: time.Now(),
+    }
+}
+
+type ToolCall struct {
+    id       string
+    name     string
+    arguments map[string]interface{}
+    result    string
+}
+
+type ConversationRole string
+
+const (
+    ConversationRoleUser      ConversationRole = "user"
+    ConversationRoleAssistant ConversationRole = "assistant"
+    ConversationRoleSystem    ConversationRole = "system"
+)
+
+type AIProvider string
+
+const (
+    AIProviderClaude  AIProvider = "claude"
+    AIProviderOpenAI  AIProvider = "openai"
+    AIProviderGemini  AIProvider = "gemini"
+    AIProviderLocal   AIProvider = "local"
+)
+
+func (p AIProvider) DefaultModel() string {
+    switch p {
+    case AIProviderClaude:
+        return "claude-3-5-sonnet-20241022"
+    case AIProviderOpenAI:
+        return "gpt-4-turbo-preview"
+    case AIProviderGemini:
+        return "gemini-pro"
+    default:
+        return "llama3"
+    }
+}
+```
+
+**PHP Reference:**
+- `app/Domain/AI/ValueObjects/`
+
+---
+
+### Task 10.2: LLM Provider Integration
+
+**Task ID:** P10-AI-002
+
+**Description:** Multi-provider LLM integration with streaming support
+
+**Priority:** Critical
+
+**Estimated Complexity:** L (16h)
+
+**Dependencies:**
+- P10-AI-001
+
+**Acceptance Criteria:**
+- [ ] LLMProvider interface
+- [ ] Claude provider (Anthropic SDK)
+- [ ] OpenAI provider
+- [ ] Provider factory
+- [ ] Streaming response support
+- [ ] Token usage tracking
+- [ ] Rate limiting
+- [ ] Error handling and retries
+- [ ] Unit tests (>85% coverage)
+
+**Files to Create:**
+```
+internal/domain/ai/provider/llm_provider.go
+internal/domain/ai/provider/claude_provider.go
+internal/domain/ai/provider/openai_provider.go
+internal/domain/ai/provider/provider_factory.go
+internal/domain/ai/provider/streaming.go
+```
+
+**Implementation Steps:**
+
+```go
+type LLMProvider interface {
+    Complete(ctx context.Context, req *CompletionRequest) (*CompletionResponse, error)
+    Stream(ctx context.Context, req *CompletionRequest) (<-chan *StreamChunk, error)
+    CountTokens(text string) int
+}
+
+type CompletionRequest struct {
+    Messages      []*Message
+    MaxTokens     int
+    Temperature   float64
+    SystemPrompt  string
+    Tools         []Tool
+}
+
+type CompletionResponse struct {
+    Content      string
+    ToolCalls    []ToolCall
+    StopReason   string
+    TokensUsed   TokenUsage
+    Model        string
+}
+
+type ClaudeProvider struct {
+    apiKey     string
+    httpClient *http.Client
+    baseURL    string
+}
+
+func (cp *ClaudeProvider) Complete(
+    ctx context.Context,
+    req *CompletionRequest,
+) (*CompletionResponse, error) {
+    // Convert messages to Claude format
+    messages := cp.convertMessages(req.Messages)
+
+    // Build request payload
+    payload := map[string]interface{}{
+        "model":       "claude-3-5-sonnet-20241022",
+        "messages":    messages,
+        "max_tokens":  req.MaxTokens,
+        "temperature": req.Temperature,
+    }
+
+    if req.SystemPrompt != "" {
+        payload["system"] = req.SystemPrompt
+    }
+
+    if len(req.Tools) > 0 {
+        payload["tools"] = cp.convertTools(req.Tools)
+    }
+
+    // Make API call
+    resp, err := cp.httpClient.Post(
+        cp.baseURL+"/v1/messages",
+        "application/json",
+        toJSON(payload),
+    )
+    if err != nil {
+        return nil, err
+    }
+    defer resp.Body.Close()
+
+    // Parse response
+    var result map[string]interface{}
+    json.NewDecoder(resp.Body).Decode(&result)
+
+    return cp.parseResponse(result), nil
+}
+
+func (cp *ClaudeProvider) Stream(
+    ctx context.Context,
+    req *CompletionRequest,
+) (<-chan *StreamChunk, error) {
+    chunks := make(chan *StreamChunk)
+
+    go func() {
+        defer close(chunks)
+
+        // Enable streaming
+        req.Stream = true
+
+        resp, err := cp.makeStreamingRequest(ctx, req)
+        if err != nil {
+            chunks <- &StreamChunk{Error: err}
+            return
+        }
+        defer resp.Body.Close()
+
+        // Parse SSE stream
+        scanner := bufio.NewScanner(resp.Body)
+        for scanner.Scan() {
+            line := scanner.Text()
+            if strings.HasPrefix(line, "data: ") {
+                data := strings.TrimPrefix(line, "data: ")
+                chunk := cp.parseStreamChunk(data)
+                chunks <- chunk
+            }
+        }
+    }()
+
+    return chunks, nil
+}
+```
+
+**PHP Reference:**
+- `app/Domain/AI/Services/AIAgentService.php`
+
+---
+
+### Task 10.3: Conversation Management
+
+**Task ID:** P10-AI-003
+
+**Description:** Conversation lifecycle management with context windowing
+
+**Priority:** Critical
+
+**Estimated Complexity:** L (14h)
+
+**Dependencies:**
+- P10-AI-002
+
+**Acceptance Criteria:**
+- [ ] ConversationAggregate with Event Horizon
+- [ ] Events: ConversationStarted, MessageAdded, ToolExecuted, ConversationEnded
+- [ ] Context window management
+- [ ] Message history pruning
+- [ ] Conversation summarization
+- [ ] Multi-turn conversation support
+- [ ] Unit tests (>90% coverage)
+
+**Files to Create:**
+```
+internal/domain/ai/aggregate/conversation_aggregate.go
+internal/domain/ai/event/conversation_events.go
+internal/domain/ai/service/conversation_service.go
+internal/domain/ai/service/context_manager.go
+```
+
+**Implementation:** Event-sourced conversation management.
+
+**PHP Reference:**
+- `app/Domain/AI/Services/ConversationService.php`
+- `app/Domain/AI/Aggregates/`
+
+---
+
+### Task 10.4: MCP (Model Context Protocol) Implementation
+
+**Task ID:** P10-AI-004
+
+**Description:** MCP server and tool integration
+
+**Priority:** High
+
+**Estimated Complexity:** L (16h)
+
+**Dependencies:**
+- P10-AI-002
+
+**Acceptance Criteria:**
+- [ ] MCP server implementation
+- [ ] Tool registration system
+- [ ] Tool execution framework
+- [ ] Financial data tools (account balance, transactions, portfolio)
+- [ ] Market data tools (prices, charts, analysis)
+- [ ] Tool result formatting
+- [ ] Unit tests (>85% coverage)
+
+**Files to Create:**
+```
+internal/domain/ai/mcp/server.go
+internal/domain/ai/mcp/tool_registry.go
+internal/domain/ai/mcp/tool_executor.go
+internal/domain/ai/mcp/tools/financial_tools.go
+internal/domain/ai/mcp/tools/market_tools.go
+```
+
+**Implementation Steps:**
+
+```go
+type MCPServer struct {
+    registry *ToolRegistry
+    executor *ToolExecutor
+}
+
+type Tool struct {
+    Name        string
+    Description string
+    Parameters  ToolParameters
+    Handler     ToolHandler
+}
+
+type ToolHandler func(ctx context.Context, args map[string]interface{}) (interface{}, error)
+
+// Financial tools
+func GetAccountBalanceTool() *Tool {
+    return &Tool{
+        Name:        "get_account_balance",
+        Description: "Retrieve the current balance for a user's account",
+        Parameters: ToolParameters{
+            Type: "object",
+            Properties: map[string]Property{
+                "account_id": {
+                    Type:        "string",
+                    Description: "The account ID to check",
+                },
+            },
+            Required: []string{"account_id"},
+        },
+        Handler: func(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+            accountID := args["account_id"].(string)
+            // Query account service
+            balance, err := accountService.GetBalance(ctx, accountID)
+            return map[string]interface{}{
+                "balance":  balance.Amount,
+                "currency": balance.Currency,
+            }, err
+        },
+    }
+}
+
+func GetPortfolioTool() *Tool {
+    return &Tool{
+        Name:        "get_portfolio",
+        Description: "Get user's investment portfolio with current values",
+        Parameters: ToolParameters{
+            Type: "object",
+            Properties: map[string]Property{
+                "user_id": {
+                    Type:        "string",
+                    Description: "User ID",
+                },
+            },
+            Required: []string{"user_id"},
+        },
+        Handler: func(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+            userID := args["user_id"].(string)
+            portfolio, err := portfolioService.GetPortfolio(ctx, userID)
+            return portfolio, err
+        },
+    }
+}
+```
+
+**PHP Reference:**
+- `app/Domain/AI/MCP/`
+
+---
+
+### Task 10.5: Multi-Agent Coordination
+
+**Task ID:** P10-AI-005
+
+**Description:** Multi-agent system with consensus and coordination
+
+**Priority:** High
+
+**Estimated Complexity:** L (16h)
+
+**Dependencies:**
+- P10-AI-003
+- P10-AI-004
+
+**Acceptance Criteria:**
+- [ ] Agent coordinator service
+- [ ] Multiple specialized agents (Analyst, Trader, Advisor)
+- [ ] Consensus building mechanism
+- [ ] Agent communication protocol
+- [ ] Task delegation
+- [ ] Result aggregation
+- [ ] Unit tests (>85% coverage)
+
+**Files to Create:**
+```
+internal/domain/ai/service/multi_agent_coordinator.go
+internal/domain/ai/service/consensus_builder.go
+internal/domain/ai/agent/analyst_agent.go
+internal/domain/ai/agent/trader_agent.go
+internal/domain/ai/agent/advisor_agent.go
+```
+
+**Implementation:** Multi-agent coordination with consensus.
+
+**PHP Reference:**
+- `app/Domain/AI/Services/MultiAgentCoordinationService.php`
+- `app/Domain/AI/Services/ConsensusBuilder.php`
+
+---
+
+### Task 10.6: Financial Analysis Tools
+
+**Task ID:** P10-AI-006
+
+**Description:** AI-powered financial analysis and insights
+
+**Priority:** High
+
+**Estimated Complexity:** M (12h)
+
+**Dependencies:**
+- P10-AI-004
+- P5-EXCHANGE-001 (Exchange)
+- P7-TREASURY-001 (Treasury)
+
+**Acceptance Criteria:**
+- [ ] Portfolio analysis tool
+- [ ] Market sentiment analysis
+- [ ] Risk analysis
+- [ ] Investment recommendations
+- [ ] Financial report generation
+- [ ] Unit tests (>85% coverage)
+
+**Files to Create:**
+```
+internal/domain/ai/service/financial_analyzer.go
+internal/domain/ai/service/sentiment_analyzer.go
+internal/domain/ai/service/recommendation_engine.go
+```
+
+---
+
+### Task 10.7: AI Projections & CQRS
+
+**Task ID:** P10-AI-007
+
+**Description:** Projections, projectors, and CQRS for AI domain
+
+**Priority:** Medium
+
+**Estimated Complexity:** M (10h)
+
+**Dependencies:**
+- P10-AI-003
+
+**Acceptance Criteria:**
+- [ ] Conversation projection
+- [ ] Agent execution history projection
+- [ ] Tool usage projection
+- [ ] Projectors
+- [ ] CQRS commands and queries
+- [ ] GORM models
+
+**Files to Create:**
+```
+internal/domain/ai/projection/conversation.go
+internal/domain/ai/projector/conversation_projector.go
+internal/domain/ai/command/commands.go
+internal/domain/ai/query/queries.go
+```
+
+---
+
+### Task 10.8: AI REST API
+
+**Task ID:** P10-AI-008
+
+**Description:** REST API endpoints for AI services
+
+**Priority:** High
+
+**Estimated Complexity:** M (10h)
+
+**Dependencies:**
+- P10-AI-007
+
+**Acceptance Criteria:**
+- [ ] POST /api/v1/ai/conversations
+- [ ] POST /api/v1/ai/conversations/{id}/messages
+- [ ] GET /api/v1/ai/conversations
+- [ ] POST /api/v1/ai/analyze/portfolio
+- [ ] POST /api/v1/ai/analyze/market
+- [ ] WebSocket support for streaming
+- [ ] OpenAPI documentation
+
+**Files to Create:**
+```
+internal/http/handler/ai_handler.go
+internal/http/dto/ai_dto.go
+internal/http/websocket/ai_stream.go
+api/openapi/ai.yaml
+```
+
+---
+
+### Task 10.9: AI Testing & Documentation
+
+**Task ID:** P10-AI-009
+
+**Description:** Integration tests and documentation for AI domain
+
+**Priority:** Medium
+
+**Estimated Complexity:** M (8h)
+
+**Dependencies:**
+- P10-AI-008
+
+**Acceptance Criteria:**
+- [ ] Integration tests for conversation flow
+- [ ] Multi-agent coordination tests
+- [ ] MCP tool execution tests
+- [ ] Documentation
+- [ ] Test coverage >80%
+
+**Files to Create:**
+```
+test/integration/ai_test.go
+test/integration/mcp_test.go
+docs/ai/conversation-api.md
+docs/ai/mcp-tools.md
+```
+
+---
+
+## Summary: Final Three Phases
+
+### Phase 6: Stablecoin (11 tasks, 132 hours)
+- Collateralized stablecoin minting/burning
+- Multi-asset reserve management
+- Price oracles with deviation detection
+- Liquidation engine
+- Algorithmic stability mechanisms
+
+### Phase 8: Lending (11 tasks, 142 hours)
+- P2P loan applications
+- Credit scoring with risk assessment
+- Amortization and interest calculation
+- Automated collection management
+- Loan lifecycle workflows
+
+### Phase 10: AI (9 tasks, 112 hours)
+- Multi-provider LLM integration
+- Conversation management
+- MCP tool integration
+- Multi-agent coordination
+- Financial analysis and insights
+
+**Total: 31 tasks, 386 hours, ~10 weeks**
+
+---
+
+**Final Migration Progress:**
+- [x] Phase 0: Infrastructure (7/7) - 100%
+- [x] Phase 1: Foundation (12/12) - 100%
+- [x] Phase 2: Account (20/20) - 100%
+- [x] Phase 3: Payment (13/13) - 100%
+- [x] Phase 4: Compliance (20/20) - 100%
+- [x] Phase 5: Exchange (14/14) - 100%
+- [x] Phase 6: Stablecoin (11/11) - 100% ✅
+- [x] Phase 7: Treasury (18/18) - 100%
+- [x] Phase 8: Lending (11/11) - 100% ✅
+- [x] Phase 9: Wallet/Blockchain (15/15) - 100%
+- [x] Phase 10: AI (9/9) - 100% ✅
+- [x] Phase 11: CGO & Governance (15/15) - 100%
+- [x] Phase 12: Banking & Fraud (10/10) - 100%
+- [x] Phase 13: Monitoring & Performance (8/8) - 100%
+- [x] Phase 14: Supporting Domains (9/9) - 100%
+
+**🎉 COMPLETE: 192/192 tasks (100%)**
+
+**Total Documented:** 2,426 hours (~61 weeks of implementation)
+
+---
+
