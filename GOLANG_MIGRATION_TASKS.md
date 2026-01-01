@@ -14591,3 +14591,1240 @@ test/integration/asset_test.go
 
 **Total Remaining:** 68 tasks (~850 hours, 21 weeks)
 
+## Phase 11: CGO & Governance Domain
+
+**Duration:** Weeks 32-36 (5 weeks)
+**Goal:** Implement Continuous Growth Offering (CGO) investment platform and DAO governance system
+**Dependencies:** Phase 2 (Account), Phase 3 (Payment), Phase 6 (Stablecoin)
+
+**PHP Reference:**
+- `app/Domain/Cgo/` (45 files) - Investment rounds, payment processing, refunds
+- `app/Domain/Governance/` (29 files) - Voting, proposals, basket governance
+
+---
+
+### Task 11.1: CGO Value Objects
+
+**Task ID:** P11-CGO-001
+
+**Description:** Implement CGO value objects for investment rounds and investor management
+
+**Priority:** Critical
+
+**Estimated Complexity:** M (8h)
+
+**Dependencies:**
+- P1-SHARED-001 (Money)
+
+**Acceptance Criteria:**
+- [ ] InvestmentStatus enum (Pending, Processing, Completed, Failed, Cancelled, Refunded)
+- [ ] RoundStatus enum (Upcoming, Active, Paused, Closed, Finalized)
+- [ ] InvestorTier enum (Retail, Accredited, Institutional, Strategic)
+- [ ] PricingModel enum (Fixed, Dutch, Bonding)
+- [ ] SharePrice value object with precision
+- [ ] InvestmentAmount value object with currency
+- [ ] AllocationCap value object
+- [ ] Unit tests (>90% coverage)
+
+**Files to Create:**
+```
+internal/domain/cgo/valueobject/investment_status.go
+internal/domain/cgo/valueobject/round_status.go
+internal/domain/cgo/valueobject/investor_tier.go
+internal/domain/cgo/valueobject/pricing_model.go
+internal/domain/cgo/valueobject/share_price.go
+internal/domain/cgo/valueobject/investment_amount.go
+internal/domain/cgo/valueobject/valueobject_test.go
+```
+
+**Implementation Steps:**
+
+```go
+package valueobject
+
+import (
+    "fmt"
+    "github.com/shopspring/decimal"
+)
+
+type InvestmentStatus string
+
+const (
+    InvestmentStatusPending    InvestmentStatus = "pending"
+    InvestmentStatusProcessing InvestmentStatus = "processing"
+    InvestmentStatusCompleted  InvestmentStatus = "completed"
+    InvestmentStatusFailed     InvestmentStatus = "failed"
+    InvestmentStatusCancelled  InvestmentStatus = "cancelled"
+    InvestmentStatusRefunded   InvestmentStatus = "refunded"
+)
+
+func (is InvestmentStatus) IsValid() bool {
+    switch is {
+    case InvestmentStatusPending, InvestmentStatusProcessing,
+         InvestmentStatusCompleted, InvestmentStatusFailed,
+         InvestmentStatusCancelled, InvestmentStatusRefunded:
+        return true
+    default:
+        return false
+    }
+}
+
+func (is InvestmentStatus) IsFinal() bool {
+    return is == InvestmentStatusCompleted ||
+           is == InvestmentStatusFailed ||
+           is == InvestmentStatusCancelled ||
+           is == InvestmentStatusRefunded
+}
+
+type RoundStatus string
+
+const (
+    RoundStatusUpcoming  RoundStatus = "upcoming"
+    RoundStatusActive    RoundStatus = "active"
+    RoundStatusPaused    RoundStatus = "paused"
+    RoundStatusClosed    RoundStatus = "closed"
+    RoundStatusFinalized RoundStatus = "finalized"
+)
+
+func (rs RoundStatus) CanAcceptInvestments() bool {
+    return rs == RoundStatusActive
+}
+
+type InvestorTier string
+
+const (
+    InvestorTierRetail        InvestorTier = "retail"
+    InvestorTierAccredited    InvestorTier = "accredited"
+    InvestorTierInstitutional InvestorTier = "institutional"
+    InvestorTierStrategic     InvestorTier = "strategic"
+)
+
+func (it InvestorTier) MinimumInvestment() decimal.Decimal {
+    switch it {
+    case InvestorTierRetail:
+        return decimal.NewFromInt(100)
+    case InvestorTierAccredited:
+        return decimal.NewFromInt(10000)
+    case InvestorTierInstitutional:
+        return decimal.NewFromInt(100000)
+    case InvestorTierStrategic:
+        return decimal.NewFromInt(500000)
+    default:
+        return decimal.Zero
+    }
+}
+
+func (it InvestorTier) RequiresAccreditation() bool {
+    return it != InvestorTierRetail
+}
+
+type SharePrice struct {
+    amount   decimal.Decimal
+    currency string
+}
+
+func NewSharePrice(amount decimal.Decimal, currency string) (*SharePrice, error) {
+    if amount.LessThanOrEqual(decimal.Zero) {
+        return nil, fmt.Errorf("share price must be positive")
+    }
+
+    if currency == "" {
+        return nil, fmt.Errorf("currency is required")
+    }
+
+    return &SharePrice{
+        amount:   amount,
+        currency: currency,
+    }, nil
+}
+
+func (sp *SharePrice) Amount() decimal.Decimal {
+    return sp.amount
+}
+
+func (sp *SharePrice) Currency() string {
+    return sp.currency
+}
+
+func (sp *SharePrice) CalculateShares(investmentAmount decimal.Decimal) decimal.Decimal {
+    return investmentAmount.Div(sp.amount)
+}
+
+type InvestmentAmount struct {
+    amount   decimal.Decimal
+    currency string
+}
+
+func NewInvestmentAmount(amount decimal.Decimal, currency string) (*InvestmentAmount, error) {
+    if amount.LessThanOrEqual(decimal.Zero) {
+        return nil, fmt.Errorf("investment amount must be positive")
+    }
+
+    return &InvestmentAmount{
+        amount:   amount,
+        currency: currency,
+    }, nil
+}
+
+func (ia *InvestmentAmount) Amount() decimal.Decimal {
+    return ia.amount
+}
+
+func (ia *InvestmentAmount) Currency() string {
+    return ia.currency
+}
+
+func (ia *InvestmentAmount) MeetsMinimum(tier InvestorTier) bool {
+    return ia.amount.GreaterThanOrEqual(tier.MinimumInvestment())
+}
+```
+
+**Testing:**
+```go
+func TestInvestmentStatus_Transitions(t *testing.T) {
+    tests := []struct {
+        name     string
+        status   InvestmentStatus
+        isFinal  bool
+    }{
+        {"pending not final", InvestmentStatusPending, false},
+        {"processing not final", InvestmentStatusProcessing, false},
+        {"completed is final", InvestmentStatusCompleted, true},
+        {"failed is final", InvestmentStatusFailed, true},
+        {"cancelled is final", InvestmentStatusCancelled, true},
+        {"refunded is final", InvestmentStatusRefunded, true},
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            if got := tt.status.IsFinal(); got != tt.isFinal {
+                t.Errorf("IsFinal() = %v, want %v", got, tt.isFinal)
+            }
+        })
+    }
+}
+
+func TestSharePrice_CalculateShares(t *testing.T) {
+    price, _ := NewSharePrice(decimal.NewFromFloat(10.00), "USD")
+    investment := decimal.NewFromFloat(1000.00)
+
+    shares := price.CalculateShares(investment)
+    expected := decimal.NewFromInt(100)
+
+    if !shares.Equal(expected) {
+        t.Errorf("CalculateShares() = %v, want %v", shares, expected)
+    }
+}
+
+func TestInvestorTier_Minimums(t *testing.T) {
+    tests := []struct {
+        tier    InvestorTier
+        minimum int64
+    }{
+        {InvestorTierRetail, 100},
+        {InvestorTierAccredited, 10000},
+        {InvestorTierInstitutional, 100000},
+        {InvestorTierStrategic, 500000},
+    }
+
+    for _, tt := range tests {
+        t.Run(string(tt.tier), func(t *testing.T) {
+            min := tt.tier.MinimumInvestment()
+            if !min.Equal(decimal.NewFromInt(tt.minimum)) {
+                t.Errorf("MinimumInvestment() = %v, want %v", min, tt.minimum)
+            }
+        })
+    }
+}
+```
+
+**Verification Commands:**
+```bash
+cd internal/domain/cgo/valueobject
+go test -v -cover
+```
+
+**PHP Reference:**
+- `app/Domain/Cgo/Models/CgoInvestment.php` (lines 34-42)
+- `app/Domain/Cgo/Models/CgoPricingRound.php`
+
+---
+
+### Task 11.2: Investment Round Aggregate
+
+**Task ID:** P11-CGO-002
+
+**Description:** Implement investment round aggregate with event sourcing for CGO rounds
+
+**Priority:** Critical
+
+**Estimated Complexity:** L (16h)
+
+**Dependencies:**
+- P0-INFRA-001 (Event Horizon)
+- P11-CGO-001
+
+**Acceptance Criteria:**
+- [ ] RoundAggregate with Event Horizon
+- [ ] Events: RoundCreated, RoundOpened, RoundClosed, PriceUpdated, InvestmentReceived
+- [ ] Round capacity and allocation tracking
+- [ ] Multiple pricing models support
+- [ ] Investor tier limits
+- [ ] Minimum/maximum investment caps
+- [ ] Unit tests (>90% coverage)
+
+**Files to Create:**
+```
+internal/domain/cgo/aggregate/round_aggregate.go
+internal/domain/cgo/event/round_events.go
+internal/domain/cgo/repository/round_repository.go
+internal/domain/cgo/aggregate/round_aggregate_test.go
+```
+
+**Implementation Steps:**
+
+```go
+package aggregate
+
+import (
+    "fmt"
+    "time"
+
+    "github.com/looplab/eventhorizon"
+    "github.com/looplab/eventhorizon/aggregatestore/events"
+    "github.com/shopspring/decimal"
+)
+
+type RoundAggregate struct {
+    *events.AggregateBase
+
+    roundID      string
+    name         string
+    status       RoundStatus
+    startDate    time.Time
+    endDate      time.Time
+    sharePrice   decimal.Decimal
+    targetAmount decimal.Decimal
+    raisedAmount decimal.Decimal
+    capacity     decimal.Decimal
+    minInvestment decimal.Decimal
+    maxInvestment decimal.Decimal
+    investorCount int
+    pricingModel  PricingModel
+    tierLimits    map[InvestorTier]decimal.Decimal
+}
+
+func NewRoundAggregate(id string) *RoundAggregate {
+    return &RoundAggregate{
+        AggregateBase: events.NewAggregateBase(RoundAggregateType, eventhorizon.UUID(id)),
+        tierLimits:    make(map[InvestorTier]decimal.Decimal),
+    }
+}
+
+// CreateRound creates a new investment round
+func (a *RoundAggregate) CreateRound(
+    name string,
+    startDate, endDate time.Time,
+    sharePrice decimal.Decimal,
+    targetAmount decimal.Decimal,
+    minInvestment, maxInvestment decimal.Decimal,
+    pricingModel PricingModel,
+) error {
+    if a.status != "" {
+        return fmt.Errorf("round already exists")
+    }
+
+    if endDate.Before(startDate) {
+        return fmt.Errorf("end date must be after start date")
+    }
+
+    if sharePrice.LessThanOrEqual(decimal.Zero) {
+        return fmt.Errorf("share price must be positive")
+    }
+
+    a.AppendEvent(&RoundCreated{
+        RoundID:       a.roundID,
+        Name:          name,
+        StartDate:     startDate,
+        EndDate:       endDate,
+        SharePrice:    sharePrice,
+        TargetAmount:  targetAmount,
+        MinInvestment: minInvestment,
+        MaxInvestment: maxInvestment,
+        PricingModel:  pricingModel,
+    }, time.Now())
+
+    return nil
+}
+
+// OpenRound opens the round for investments
+func (a *RoundAggregate) OpenRound() error {
+    if a.status != RoundStatusUpcoming {
+        return fmt.Errorf("can only open upcoming rounds")
+    }
+
+    if time.Now().Before(a.startDate) {
+        return fmt.Errorf("round start date not reached")
+    }
+
+    a.AppendEvent(&RoundOpened{
+        RoundID:   a.roundID,
+        OpenedAt:  time.Now(),
+    }, time.Now())
+
+    return nil
+}
+
+// RecordInvestment records an investment in the round
+func (a *RoundAggregate) RecordInvestment(
+    investmentID string,
+    investorID string,
+    amount decimal.Decimal,
+    tier InvestorTier,
+) error {
+    if a.status != RoundStatusActive {
+        return fmt.Errorf("round not accepting investments")
+    }
+
+    if amount.LessThan(a.minInvestment) {
+        return fmt.Errorf("investment below minimum: %s", a.minInvestment)
+    }
+
+    if !a.maxInvestment.IsZero() && amount.GreaterThan(a.maxInvestment) {
+        return fmt.Errorf("investment exceeds maximum: %s", a.maxInvestment)
+    }
+
+    // Check tier limits
+    if tierLimit, exists := a.tierLimits[tier]; exists {
+        if amount.GreaterThan(tierLimit) {
+            return fmt.Errorf("investment exceeds tier limit")
+        }
+    }
+
+    newTotal := a.raisedAmount.Add(amount)
+    if !a.capacity.IsZero() && newTotal.GreaterThan(a.capacity) {
+        return fmt.Errorf("round capacity exceeded")
+    }
+
+    shares := amount.Div(a.sharePrice)
+
+    a.AppendEvent(&InvestmentReceived{
+        RoundID:      a.roundID,
+        InvestmentID: investmentID,
+        InvestorID:   investorID,
+        Amount:       amount,
+        SharePrice:   a.sharePrice,
+        Shares:       shares,
+        Tier:         tier,
+        ReceivedAt:   time.Now(),
+    }, time.Now())
+
+    return nil
+}
+
+// CloseRound closes the round
+func (a *RoundAggregate) CloseRound() error {
+    if a.status != RoundStatusActive {
+        return fmt.Errorf("can only close active rounds")
+    }
+
+    a.AppendEvent(&RoundClosed{
+        RoundID:      a.roundID,
+        ClosedAt:     time.Now(),
+        RaisedAmount: a.raisedAmount,
+        InvestorCount: a.investorCount,
+    }, time.Now())
+
+    return nil
+}
+
+// UpdatePrice updates the share price (for dynamic pricing models)
+func (a *RoundAggregate) UpdatePrice(newPrice decimal.Decimal) error {
+    if a.pricingModel == PricingModelFixed {
+        return fmt.Errorf("cannot update price for fixed pricing model")
+    }
+
+    if newPrice.LessThanOrEqual(decimal.Zero) {
+        return fmt.Errorf("price must be positive")
+    }
+
+    a.AppendEvent(&PriceUpdated{
+        RoundID:   a.roundID,
+        OldPrice:  a.sharePrice,
+        NewPrice:  newPrice,
+        UpdatedAt: time.Now(),
+    }, time.Now())
+
+    return nil
+}
+
+// Event handlers
+func (a *RoundAggregate) ApplyEvent(event eventhorizon.Event) error {
+    switch e := event.Data().(type) {
+    case *RoundCreated:
+        a.roundID = e.RoundID
+        a.name = e.Name
+        a.status = RoundStatusUpcoming
+        a.startDate = e.StartDate
+        a.endDate = e.EndDate
+        a.sharePrice = e.SharePrice
+        a.targetAmount = e.TargetAmount
+        a.minInvestment = e.MinInvestment
+        a.maxInvestment = e.MaxInvestment
+        a.pricingModel = e.PricingModel
+        a.raisedAmount = decimal.Zero
+        a.investorCount = 0
+
+    case *RoundOpened:
+        a.status = RoundStatusActive
+
+    case *InvestmentReceived:
+        a.raisedAmount = a.raisedAmount.Add(e.Amount)
+        a.investorCount++
+
+    case *RoundClosed:
+        a.status = RoundStatusClosed
+
+    case *PriceUpdated:
+        a.sharePrice = e.NewPrice
+    }
+
+    return nil
+}
+```
+
+**Verification Commands:**
+```bash
+cd internal/domain/cgo/aggregate
+go test -v -cover
+```
+
+**PHP Reference:**
+- `app/Domain/Cgo/Aggregates/`
+- `app/Domain/Cgo/Events/`
+
+---
+
+### Task 11.3: Investment Payment Processing
+
+**Task ID:** P11-CGO-003
+
+**Description:** Payment processing service for CGO investments with multi-gateway support
+
+**Priority:** Critical
+
+**Estimated Complexity:** L (14h)
+
+**Dependencies:**
+- P3-PAYMENT-004 (Stripe Integration)
+- P11-CGO-002
+
+**Acceptance Criteria:**
+- [ ] Payment service interface
+- [ ] Stripe payment processor
+- [ ] Crypto payment processor (Coinbase Commerce)
+- [ ] Payment verification service
+- [ ] Idempotency handling
+- [ ] Webhook processing
+- [ ] Unit tests (>85% coverage)
+
+**Files to Create:**
+```
+internal/domain/cgo/service/payment_service.go
+internal/domain/cgo/service/stripe_processor.go
+internal/domain/cgo/service/crypto_processor.go
+internal/domain/cgo/service/payment_verifier.go
+internal/domain/cgo/service/payment_test.go
+```
+
+**Implementation:** Multi-gateway payment processing with webhook verification.
+
+**PHP Reference:**
+- `app/Domain/Cgo/Services/StripePaymentService.php`
+- `app/Domain/Cgo/Services/CoinbaseCommerceService.php`
+- `app/Domain/Cgo/Services/PaymentVerificationService.php`
+
+---
+
+### Task 11.4: Investment Workflow
+
+**Task ID:** P11-CGO-004
+
+**Description:** Temporal workflow for investment processing with KYC verification
+
+**Priority:** Critical
+
+**Estimated Complexity:** L (16h)
+
+**Dependencies:**
+- P0-INFRA-003 (Temporal)
+- P4-COMPLIANCE-001 (KYC)
+- P11-CGO-003
+
+**Acceptance Criteria:**
+- [ ] InvestmentWorkflow with Temporal
+- [ ] KYC verification step
+- [ ] Payment processing step
+- [ ] Share allocation step
+- [ ] Investment confirmation
+- [ ] Email notifications
+- [ ] Compensation on failures
+- [ ] Unit tests (>85% coverage)
+
+**Files to Create:**
+```
+internal/domain/cgo/workflow/investment_workflow.go
+internal/domain/cgo/workflow/activities.go
+internal/domain/cgo/workflow/workflow_test.go
+```
+
+**Implementation:** Complete investment processing workflow with KYC compliance.
+
+---
+
+### Task 11.5: Refund Management
+
+**Task ID:** P11-CGO-005
+
+**Description:** Refund processing system with approval workflow
+
+**Priority:** High
+
+**Estimated Complexity:** M (12h)
+
+**Dependencies:**
+- P11-CGO-002
+
+**Acceptance Criteria:**
+- [ ] RefundAggregate with Event Horizon
+- [ ] Refund request, approval, processing workflow
+- [ ] Refund calculation (full/partial)
+- [ ] Payment gateway refund integration
+- [ ] Refund status tracking
+- [ ] Unit tests (>85% coverage)
+
+**Files to Create:**
+```
+internal/domain/cgo/aggregate/refund_aggregate.go
+internal/domain/cgo/event/refund_events.go
+internal/domain/cgo/workflow/refund_workflow.go
+internal/domain/cgo/service/refund_service.go
+```
+
+**Implementation:** Event-sourced refund management with approval workflow.
+
+**PHP Reference:**
+- `app/Domain/Cgo/Events/Refund*.php`
+- `app/Domain/Cgo/Workflows/RefundWorkflow.php`
+
+---
+
+### Task 11.6: Governance Value Objects
+
+**Task ID:** P11-GOVERNANCE-001
+
+**Description:** Implement governance value objects for voting and proposals
+
+**Priority:** Critical
+
+**Estimated Complexity:** M (8h)
+
+**Dependencies:**
+- None
+
+**Acceptance Criteria:**
+- [ ] ProposalType enum (Constitutional, Parameter, Treasury, Basket, Feature)
+- [ ] ProposalStatus enum (Draft, Active, Passed, Rejected, Executed, Cancelled)
+- [ ] VoteChoice enum (For, Against, Abstain)
+- [ ] VotingStrategy enum (OneUserOneVote, TokenWeighted, AssetWeighted, Quadratic)
+- [ ] QuorumRequirement value object
+- [ ] VotingPower value object
+- [ ] Unit tests (>90% coverage)
+
+**Files to Create:**
+```
+internal/domain/governance/valueobject/proposal_type.go
+internal/domain/governance/valueobject/proposal_status.go
+internal/domain/governance/valueobject/vote_choice.go
+internal/domain/governance/valueobject/voting_strategy.go
+internal/domain/governance/valueobject/quorum.go
+internal/domain/governance/valueobject/valueobject_test.go
+```
+
+**Implementation Steps:**
+
+```go
+package valueobject
+
+import (
+    "fmt"
+    "github.com/shopspring/decimal"
+)
+
+type ProposalType string
+
+const (
+    ProposalTypeConstitutional ProposalType = "constitutional"
+    ProposalTypeParameter      ProposalType = "parameter"
+    ProposalTypeTreasury       ProposalType = "treasury"
+    ProposalTypeBasket         ProposalType = "basket"
+    ProposalTypeFeature        ProposalType = "feature"
+)
+
+func (pt ProposalType) RequiresSuperMajority() bool {
+    return pt == ProposalTypeConstitutional || pt == ProposalTypeBasket
+}
+
+func (pt ProposalType) MinimumQuorum() decimal.Decimal {
+    switch pt {
+    case ProposalTypeConstitutional:
+        return decimal.NewFromFloat(0.67) // 67%
+    case ProposalTypeBasket:
+        return decimal.NewFromFloat(0.60) // 60%
+    case ProposalTypeTreasury:
+        return decimal.NewFromFloat(0.51) // 51%
+    default:
+        return decimal.NewFromFloat(0.40) // 40%
+    }
+}
+
+type ProposalStatus string
+
+const (
+    ProposalStatusDraft     ProposalStatus = "draft"
+    ProposalStatusActive    ProposalStatus = "active"
+    ProposalStatusPassed    ProposalStatus = "passed"
+    ProposalStatusRejected  ProposalStatus = "rejected"
+    ProposalStatusExecuted  ProposalStatus = "executed"
+    ProposalStatusCancelled ProposalStatus = "cancelled"
+)
+
+func (ps ProposalStatus) CanVote() bool {
+    return ps == ProposalStatusActive
+}
+
+func (ps ProposalStatus) IsFinal() bool {
+    return ps == ProposalStatusPassed ||
+           ps == ProposalStatusRejected ||
+           ps == ProposalStatusExecuted ||
+           ps == ProposalStatusCancelled
+}
+
+type VoteChoice string
+
+const (
+    VoteChoiceFor     VoteChoice = "for"
+    VoteChoiceAgainst VoteChoice = "against"
+    VoteChoiceAbstain VoteChoice = "abstain"
+)
+
+type VotingStrategy string
+
+const (
+    VotingStrategyOneUserOneVote VotingStrategy = "one_user_one_vote"
+    VotingStrategyTokenWeighted  VotingStrategy = "token_weighted"
+    VotingStrategyAssetWeighted  VotingStrategy = "asset_weighted"
+    VotingStrategyQuadratic      VotingStrategy = "quadratic"
+)
+
+type QuorumRequirement struct {
+    percentage decimal.Decimal
+    minimum    int64
+}
+
+func NewQuorumRequirement(percentage decimal.Decimal, minimum int64) (*QuorumRequirement, error) {
+    if percentage.LessThan(decimal.Zero) || percentage.GreaterThan(decimal.NewFromInt(100)) {
+        return nil, fmt.Errorf("percentage must be between 0 and 100")
+    }
+
+    if minimum < 0 {
+        return nil, fmt.Errorf("minimum must be non-negative")
+    }
+
+    return &QuorumRequirement{
+        percentage: percentage.Div(decimal.NewFromInt(100)),
+        minimum:    minimum,
+    }, nil
+}
+
+func (qr *QuorumRequirement) IsMet(totalVotes, eligibleVoters int64) bool {
+    minByPercentage := decimal.NewFromInt(eligibleVoters).Mul(qr.percentage).IntPart()
+    requiredVotes := max(minByPercentage, qr.minimum)
+
+    return totalVotes >= requiredVotes
+}
+
+type VotingPower struct {
+    base       decimal.Decimal
+    multiplier decimal.Decimal
+}
+
+func NewVotingPower(base decimal.Decimal, multiplier decimal.Decimal) *VotingPower {
+    return &VotingPower{
+        base:       base,
+        multiplier: multiplier,
+    }
+}
+
+func (vp *VotingPower) Calculate() decimal.Decimal {
+    return vp.base.Mul(vp.multiplier)
+}
+```
+
+**PHP Reference:**
+- `app/Domain/Governance/Enums/PollType.php`
+- `app/Domain/Governance/Enums/PollStatus.php`
+
+---
+
+### Task 11.7: Proposal Aggregate
+
+**Task ID:** P11-GOVERNANCE-002
+
+**Description:** Implement proposal aggregate with voting lifecycle
+
+**Priority:** Critical
+
+**Estimated Complexity:** L (16h)
+
+**Dependencies:**
+- P0-INFRA-001 (Event Horizon)
+- P11-GOVERNANCE-001
+
+**Acceptance Criteria:**
+- [ ] ProposalAggregate with Event Horizon
+- [ ] Events: ProposalCreated, VoteCast, ProposalPassed, ProposalRejected, ProposalExecuted
+- [ ] Multiple voting strategies
+- [ ] Quorum validation
+- [ ] Vote delegation support
+- [ ] Time-locked voting periods
+- [ ] Unit tests (>90% coverage)
+
+**Files to Create:**
+```
+internal/domain/governance/aggregate/proposal_aggregate.go
+internal/domain/governance/event/proposal_events.go
+internal/domain/governance/repository/proposal_repository.go
+internal/domain/governance/aggregate/proposal_test.go
+```
+
+**Implementation:** Event-sourced proposal lifecycle with vote counting.
+
+**PHP Reference:**
+- `app/Domain/Governance/Models/GcuVotingProposal.php`
+- `app/Domain/Governance/Models/Vote.php`
+
+---
+
+### Task 11.8: Voting Strategy Service
+
+**Task ID:** P11-GOVERNANCE-003
+
+**Description:** Voting power calculation service with multiple strategies
+
+**Priority:** High
+
+**Estimated Complexity:** M (12h)
+
+**Dependencies:**
+- P11-GOVERNANCE-002
+
+**Acceptance Criteria:**
+- [ ] VotingStrategy interface
+- [ ] OneUserOneVote strategy
+- [ ] TokenWeighted strategy
+- [ ] AssetWeighted strategy
+- [ ] Quadratic voting strategy
+- [ ] Vote delegation service
+- [ ] Unit tests (>90% coverage)
+
+**Files to Create:**
+```
+internal/domain/governance/service/voting_strategy.go
+internal/domain/governance/strategy/one_user_one_vote.go
+internal/domain/governance/strategy/token_weighted.go
+internal/domain/governance/strategy/asset_weighted.go
+internal/domain/governance/strategy/quadratic.go
+internal/domain/governance/service/delegation_service.go
+```
+
+**Implementation Steps:**
+
+```go
+type VotingStrategy interface {
+    CalculateVotingPower(voter *Voter, proposal *Proposal) (decimal.Decimal, error)
+    ValidateVote(voter *Voter, proposal *Proposal, choice VoteChoice) error
+}
+
+// OneUserOneVote - each user gets 1 vote
+type OneUserOneVoteStrategy struct{}
+
+func (s *OneUserOneVoteStrategy) CalculateVotingPower(voter *Voter, proposal *Proposal) (decimal.Decimal, error) {
+    return decimal.NewFromInt(1), nil
+}
+
+// TokenWeighted - voting power based on token holdings
+type TokenWeightedStrategy struct {
+    tokenBalance func(userID string) decimal.Decimal
+}
+
+func (s *TokenWeightedStrategy) CalculateVotingPower(voter *Voter, proposal *Proposal) (decimal.Decimal, error) {
+    balance := s.tokenBalance(voter.ID)
+    return balance, nil
+}
+
+// AssetWeighted - voting power based on asset value
+type AssetWeightedStrategy struct {
+    assetValue func(userID string) decimal.Decimal
+}
+
+func (s *AssetWeightedStrategy) CalculateVotingPower(voter *Voter, proposal *Proposal) (decimal.Decimal, error) {
+    value := s.assetValue(voter.ID)
+    return value, nil
+}
+
+// Quadratic - sqrt of token holdings
+type QuadraticVotingStrategy struct {
+    tokenBalance func(userID string) decimal.Decimal
+}
+
+func (s *QuadraticVotingStrategy) CalculateVotingPower(voter *Voter, proposal *Proposal) (decimal.Decimal, error) {
+    balance := s.tokenBalance(voter.ID)
+    // Calculate square root
+    power := balance.Sqrt()
+    return power, nil
+}
+```
+
+**PHP Reference:**
+- `app/Domain/Governance/Strategies/OneUserOneVoteStrategy.php`
+- `app/Domain/Governance/Strategies/AssetWeightedVotingStrategy.php`
+
+---
+
+### Task 11.9: Governance Workflows
+
+**Task ID:** P11-GOVERNANCE-004
+
+**Description:** Temporal workflows for proposal execution and basket rebalancing
+
+**Priority:** High
+
+**Estimated Complexity:** L (14h)
+
+**Dependencies:**
+- P0-INFRA-003 (Temporal)
+- P11-GOVERNANCE-002
+
+**Acceptance Criteria:**
+- [ ] ProposalExecutionWorkflow
+- [ ] BasketRebalancingWorkflow (for GCU basket governance)
+- [ ] FeatureToggleWorkflow
+- [ ] ConfigurationUpdateWorkflow
+- [ ] Human approval tasks
+- [ ] Unit tests (>85% coverage)
+
+**Files to Create:**
+```
+internal/domain/governance/workflow/proposal_execution_workflow.go
+internal/domain/governance/workflow/basket_rebalancing_workflow.go
+internal/domain/governance/workflow/feature_toggle_workflow.go
+internal/domain/governance/workflow/activities.go
+```
+
+**Implementation:** Temporal workflows with human approval for critical governance actions.
+
+**PHP Reference:**
+- `app/Domain/Governance/Workflows/AddAssetWorkflow.php`
+- `app/Domain/Governance/Workflows/UpdateConfigurationWorkflow.php`
+- `app/Domain/Governance/Activities/`
+
+---
+
+### Task 11.10: CGO & Governance Projections
+
+**Task ID:** P11-CGO-GOVERNANCE-005
+
+**Description:** Projection models for CGO and governance read operations
+
+**Priority:** High
+
+**Estimated Complexity:** M (10h)
+
+**Dependencies:**
+- P11-CGO-002
+- P11-GOVERNANCE-002
+
+**Acceptance Criteria:**
+- [ ] Investment projection
+- [ ] Round projection
+- [ ] Investor projection
+- [ ] Proposal projection
+- [ ] Vote projection
+- [ ] GORM models with indexes
+- [ ] Migration files
+
+**Files to Create:**
+```
+internal/domain/cgo/projection/investment.go
+internal/domain/cgo/projection/round.go
+internal/domain/cgo/projection/investor.go
+internal/domain/governance/projection/proposal.go
+internal/domain/governance/projection/vote.go
+migrations/cgo/001_create_investments_table.sql
+migrations/governance/001_create_proposals_table.sql
+```
+
+---
+
+### Task 11.11: CGO & Governance Projectors
+
+**Task ID:** P11-CGO-GOVERNANCE-006
+
+**Description:** Event Horizon projectors for CGO and governance domains
+
+**Priority:** High
+
+**Estimated Complexity:** M (10h)
+
+**Dependencies:**
+- P11-CGO-GOVERNANCE-005
+
+**Acceptance Criteria:**
+- [ ] InvestmentProjector
+- [ ] RoundProjector
+- [ ] ProposalProjector
+- [ ] VoteProjector
+- [ ] Idempotent event handling
+- [ ] Unit tests (>90% coverage)
+
+**Files to Create:**
+```
+internal/domain/cgo/projector/investment_projector.go
+internal/domain/cgo/projector/round_projector.go
+internal/domain/governance/projector/proposal_projector.go
+internal/domain/governance/projector/vote_projector.go
+```
+
+---
+
+### Task 11.12: CGO & Governance CQRS
+
+**Task ID:** P11-CGO-GOVERNANCE-007
+
+**Description:** CQRS commands and queries for CGO and governance operations
+
+**Priority:** Critical
+
+**Estimated Complexity:** M (12h)
+
+**Dependencies:**
+- P0-INFRA-002 (CQRS Bus)
+- P11-CGO-GOVERNANCE-006
+
+**Acceptance Criteria:**
+- [ ] CGO Commands: CreateRound, RecordInvestment, ProcessRefund
+- [ ] Governance Commands: CreateProposal, CastVote, ExecuteProposal
+- [ ] CGO Queries: GetRounds, GetInvestments, GetInvestorPortfolio
+- [ ] Governance Queries: GetProposals, GetVotes, GetVotingPower
+- [ ] Unit tests (>90% coverage)
+
+**Files to Create:**
+```
+internal/domain/cgo/command/commands.go
+internal/domain/cgo/command/handlers.go
+internal/domain/cgo/query/queries.go
+internal/domain/cgo/query/handlers.go
+internal/domain/governance/command/commands.go
+internal/domain/governance/command/handlers.go
+internal/domain/governance/query/queries.go
+internal/domain/governance/query/handlers.go
+```
+
+---
+
+### Task 11.13: CGO & Governance REST API
+
+**Task ID:** P11-CGO-GOVERNANCE-008
+
+**Description:** REST API endpoints for CGO and governance operations
+
+**Priority:** Critical
+
+**Estimated Complexity:** M (12h)
+
+**Dependencies:**
+- P11-CGO-GOVERNANCE-007
+
+**Acceptance Criteria:**
+- [ ] CGO endpoints (rounds, investments, refunds)
+- [ ] Governance endpoints (proposals, votes, delegation)
+- [ ] Public investment data endpoints
+- [ ] Investor dashboard endpoints
+- [ ] OpenAPI documentation
+- [ ] Unit tests (>85% coverage)
+
+**Files to Create:**
+```
+internal/http/handler/cgo_handler.go
+internal/http/handler/governance_handler.go
+internal/http/dto/cgo_dto.go
+internal/http/dto/governance_dto.go
+api/openapi/cgo.yaml
+api/openapi/governance.yaml
+```
+
+**API Endpoints:**
+```
+# CGO
+POST   /api/v1/cgo/rounds
+GET    /api/v1/cgo/rounds
+GET    /api/v1/cgo/rounds/{id}
+POST   /api/v1/cgo/rounds/{id}/invest
+POST   /api/v1/cgo/investments/{id}/refund
+GET    /api/v1/cgo/investors/me
+
+# Governance
+POST   /api/v1/governance/proposals
+GET    /api/v1/governance/proposals
+GET    /api/v1/governance/proposals/{id}
+POST   /api/v1/governance/proposals/{id}/vote
+POST   /api/v1/governance/delegation
+GET    /api/v1/governance/voting-power
+```
+
+---
+
+### Task 11.14: CGO & Governance Testing
+
+**Task ID:** P11-CGO-GOVERNANCE-009
+
+**Description:** Integration and E2E tests for CGO and governance domains
+
+**Priority:** High
+
+**Estimated Complexity:** M (10h)
+
+**Dependencies:**
+- P11-CGO-GOVERNANCE-008
+
+**Acceptance Criteria:**
+- [ ] Integration tests for investment flow
+- [ ] E2E tests for proposal lifecycle
+- [ ] Load tests for voting
+- [ ] Test coverage >85%
+
+**Files to Create:**
+```
+test/integration/cgo_test.go
+test/integration/governance_test.go
+test/e2e/investment_flow_test.go
+test/e2e/proposal_lifecycle_test.go
+```
+
+---
+
+### Task 11.15: CGO & Governance Documentation
+
+**Task ID:** P11-CGO-GOVERNANCE-010
+
+**Description:** Comprehensive documentation for CGO and governance systems
+
+**Priority:** Medium
+
+**Estimated Complexity:** M (8h)
+
+**Dependencies:**
+- All P11 tasks
+
+**Acceptance Criteria:**
+- [ ] Investment guide
+- [ ] Governance participation guide
+- [ ] API documentation
+- [ ] Investor onboarding guide
+- [ ] Proposal creation guide
+
+**Files to Create:**
+```
+docs/cgo/investment-guide.md
+docs/cgo/api.md
+docs/governance/participation-guide.md
+docs/governance/proposal-guide.md
+docs/governance/voting-strategies.md
+```
+
+---
+
+## Phase 11 Summary: CGO & Governance
+
+**Total Tasks:** 15
+**Total Estimated Hours:** 184 hours
+**Estimated Duration:** 5 weeks
+**Lines of Code:** ~2,800
+
+### Core Components Delivered:
+
+**CGO Investment Platform (Tasks 11.1-11.5):** 66 hours
+- Investment round management with multiple pricing models
+- Multi-gateway payment processing (Stripe, crypto)
+- KYC verification integration
+- Investment workflow with Temporal
+- Refund management with approval workflow
+- Investor tier management
+
+**Governance System (Tasks 11.6-11.9):** 50 hours
+- Proposal lifecycle management
+- Multiple voting strategies (1U1V, token-weighted, asset-weighted, quadratic)
+- Vote delegation support
+- Quorum requirements
+- GCU basket governance
+- Proposal execution workflows
+
+**Infrastructure (Tasks 11.10-11.15):** 68 hours
+- Projections and projectors
+- CQRS implementation
+- REST API endpoints
+- Integration tests
+- Comprehensive documentation
+
+### Key Accomplishments:
+
+✅ **CGO Platform**
+- Multi-round investment management
+- Stripe and crypto payment support
+- Automated share allocation
+- KYC compliance
+- Refund processing
+
+✅ **Governance**
+- DAO voting system
+- 4 voting strategies
+- Proposal execution workflows
+- Vote delegation
+- Basket rebalancing governance
+
+✅ **Event Sourcing**
+- Complete audit trail
+- Investment history
+- Voting records
+- Refund lifecycle
+
+✅ **Compliance**
+- Investor tier verification
+- KYC integration
+- Investment limits
+- Regulatory reporting
+
+### PHP Coverage:
+
+All major CGO & Governance components migrated:
+- ✅ `app/Domain/Cgo/Aggregates/`
+- ✅ `app/Domain/Cgo/Events/`
+- ✅ `app/Domain/Cgo/Workflows/`
+- ✅ `app/Domain/Cgo/Services/`
+- ✅ `app/Domain/Governance/Models/`
+- ✅ `app/Domain/Governance/Strategies/`
+- ✅ `app/Domain/Governance/Workflows/`
+
+---
+
