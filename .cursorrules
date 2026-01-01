@@ -1,0 +1,1407 @@
+# FinAegis Golang Fintech Platform - Cursor AI Rules
+
+> **Complete development guidelines for building event-sourced, CQRS-based fintech platform in Go**
+>
+> Project: PHP/Laravel → Golang Migration
+> Architecture: DDD + CQRS + Event Sourcing + Hexagonal
+> Total Tasks: 180 atomic tasks across 15 domains
+
+---
+
+## 🎯 Project Overview
+
+You are building a **production-grade fintech platform** in Golang with:
+
+- **Event Sourcing** using Event Horizon framework
+- **CQRS** pattern with separate read/write models
+- **Domain-Driven Design** with bounded contexts (15 domains)
+- **Hexagonal Architecture** (Ports & Adapters)
+- **Temporal Workflows** for complex sagas
+- **Multi-tenancy** and **multi-currency** support
+- **Comprehensive observability** (OpenTelemetry, Prometheus, Jaeger)
+
+### Core Domains
+
+1. **Account** - Multi-currency accounts, balance management
+2. **Payment** - Deposits, withdrawals, transfers (Stripe, Open Banking, ISO20022)
+3. **Compliance** - KYC/AML, transaction monitoring, sanctions screening
+4. **Exchange** - Trading engine, order matching, liquidity pools
+5. **Stablecoin** - Collateralized stablecoin, minting/burning
+6. **Treasury** - Portfolio management, DeFi integration, yield optimization
+7. **Lending** - P2P loans, credit scoring, repayment tracking
+8. **Wallet** - HD wallets (BIP32/39/44), multi-chain support
+9. **AI** - Multi-provider LLM, financial analysis, agent coordination
+10. **CGO** - Continuous Growth Offering, investment tracking
+11. **Governance** - DAO voting, proposal management
+12. **Banking** - Core banking operations, fraud detection
+13. **Monitoring** - Performance metrics, alerting
+14. **Supporting** - Notifications, webhooks, audit logs
+
+---
+
+## 📁 Project Structure
+
+**CRITICAL:** Always adhere to this exact folder structure:
+
+```
+finaegis-go/
+├── cmd/                          # Application entry points
+│   ├── api-server/              # REST API server
+│   ├── cli/                     # CLI tools
+│   ├── worker/                  # Background workers
+│   └── migrate/                 # Database migrations
+├── internal/                     # Private application code
+│   ├── domain/                  # Domain layer (DDD)
+│   │   ├── {domain}/           # Per-domain folder
+│   │   │   ├── aggregate/      # Aggregates (event-sourced entities)
+│   │   │   ├── event/          # Domain events
+│   │   │   ├── command/        # Commands (write operations)
+│   │   │   ├── query/          # Queries (read operations)
+│   │   │   ├── valueobject/    # Value objects (immutable)
+│   │   │   ├── service/        # Domain services
+│   │   │   ├── projection/     # Read models (CQRS)
+│   │   │   ├── projector/      # Event handlers → projections
+│   │   │   ├── workflow/       # Temporal workflows
+│   │   │   └── repository/     # Repository interfaces
+│   │   └── shared/             # Shared kernel
+│   ├── application/            # Application layer
+│   │   ├── handler/           # Command/query handlers
+│   │   └── service/           # Application services
+│   ├── infrastructure/         # Infrastructure layer
+│   │   ├── eventstore/        # Event Horizon implementation
+│   │   ├── persistence/       # GORM repositories
+│   │   ├── http/              # Gin HTTP handlers
+│   │   ├── temporal/          # Temporal client
+│   │   └── external/          # External API clients
+│   └── api/                   # API contracts (OpenAPI)
+├── pkg/                        # Public libraries
+│   ├── money/                 # Money value object
+│   ├── crypto/                # Cryptographic utilities
+│   └── validator/             # Validation helpers
+├── test/                       # Test utilities
+│   ├── fixtures/              # Test fixtures
+│   ├── mocks/                 # Generated mocks
+│   └── integration/           # Integration tests
+├── deployments/               # Deployment configurations
+│   ├── docker/               # Docker Compose
+│   └── k8s/                  # Kubernetes manifests
+├── migrations/                # Database migrations
+├── docs/                      # Documentation
+└── scripts/                   # Build/utility scripts
+```
+
+---
+
+## 🏗️ Architecture Patterns
+
+### 1. Event Sourcing with Event Horizon
+
+**ALWAYS** use Event Horizon for aggregates:
+
+```go
+import "github.com/looplab/eventhorizon"
+
+// Aggregate example
+type AccountAggregate struct {
+    *eventhorizon.AggregateBase
+    balance    decimal.Decimal
+    status     AccountStatus
+    currency   string
+    // ... other fields
+}
+
+// Factory function
+func NewAccountAggregate(id uuid.UUID) *AccountAggregate {
+    return &AccountAggregate{
+        AggregateBase: eventhorizon.NewAggregateBase(AccountAggregateType, id),
+    }
+}
+
+// Command handler
+func (a *AccountAggregate) HandleCommand(ctx context.Context, cmd eventhorizon.Command) error {
+    switch cmd := cmd.(type) {
+    case *CreateAccountCommand:
+        return a.handleCreateAccount(ctx, cmd)
+    case *DepositCommand:
+        return a.handleDeposit(ctx, cmd)
+    // ... other commands
+    }
+    return fmt.Errorf("unknown command: %T", cmd)
+}
+
+// Business logic that emits events
+func (a *AccountAggregate) handleDeposit(ctx context.Context, cmd *DepositCommand) error {
+    // Validation
+    if cmd.Amount.LessThanOrEqual(decimal.Zero) {
+        return ErrInvalidAmount
+    }
+
+    // Emit event (don't mutate state here!)
+    a.AppendEvent(DepositedEventType, &DepositedEvent{
+        AccountID: a.EntityID(),
+        Amount:    cmd.Amount,
+        Currency:  cmd.Currency,
+        Timestamp: time.Now(),
+    }, time.Now())
+
+    return nil
+}
+
+// Event handler (applies state changes)
+func (a *AccountAggregate) ApplyEvent(ctx context.Context, event eventhorizon.Event) error {
+    switch e := event.Data().(type) {
+    case *AccountCreatedEvent:
+        a.balance = decimal.Zero
+        a.currency = e.Currency
+        a.status = AccountStatusActive
+    case *DepositedEvent:
+        a.balance = a.balance.Add(e.Amount)
+    case *WithdrawnEvent:
+        a.balance = a.balance.Sub(e.Amount)
+    // ... other events
+    }
+    return nil
+}
+```
+
+**Rules:**
+- ✅ Commands → validate and emit events
+- ✅ Events → apply state changes
+- ✅ Never mutate state in command handlers
+- ✅ Events are immutable facts (past tense naming)
+- ✅ Commands can fail, events cannot
+
+### 2. CQRS Pattern
+
+**Separate read and write models:**
+
+```go
+// Write side - Command
+type CreateAccountCommand struct {
+    TenantID  uuid.UUID
+    UserID    uuid.UUID
+    Currency  string
+    AccountType AccountType
+}
+
+// Write side - Command handler
+type CreateAccountHandler struct {
+    repo eventhorizon.AggregateStore
+}
+
+func (h *CreateAccountHandler) Handle(ctx context.Context, cmd *CreateAccountCommand) error {
+    agg := NewAccountAggregate(uuid.New())
+    if err := agg.HandleCommand(ctx, cmd); err != nil {
+        return err
+    }
+    return h.repo.Save(ctx, agg)
+}
+
+// Read side - Query
+type GetAccountQuery struct {
+    AccountID uuid.UUID
+}
+
+// Read side - Projection (read model)
+type AccountProjection struct {
+    ID            uuid.UUID      `gorm:"primaryKey"`
+    TenantID      uuid.UUID      `gorm:"index"`
+    UserID        uuid.UUID      `gorm:"index"`
+    Balance       decimal.Decimal `gorm:"type:decimal(20,8)"`
+    Currency      string         `gorm:"size:3"`
+    Status        string         `gorm:"size:20;index"`
+    CreatedAt     time.Time
+    UpdatedAt     time.Time
+}
+
+// Read side - Query handler
+type GetAccountQueryHandler struct {
+    db *gorm.DB
+}
+
+func (h *GetAccountQueryHandler) Handle(ctx context.Context, q *GetAccountQuery) (*AccountProjection, error) {
+    var account AccountProjection
+    if err := h.db.First(&account, "id = ?", q.AccountID).Error; err != nil {
+        return nil, err
+    }
+    return &account, nil
+}
+
+// Projector - Updates read model from events
+type AccountProjector struct {
+    db *gorm.DB
+}
+
+func (p *AccountProjector) ProjectorType() eventhorizon.ProjectorType {
+    return "account_projector"
+}
+
+func (p *AccountProjector) Project(ctx context.Context, event eventhorizon.Event) error {
+    switch e := event.Data().(type) {
+    case *AccountCreatedEvent:
+        return p.db.Create(&AccountProjection{
+            ID:        event.AggregateID(),
+            TenantID:  e.TenantID,
+            UserID:    e.UserID,
+            Balance:   decimal.Zero,
+            Currency:  e.Currency,
+            Status:    "active",
+            CreatedAt: event.Timestamp(),
+        }).Error
+
+    case *DepositedEvent:
+        return p.db.Model(&AccountProjection{}).
+            Where("id = ?", event.AggregateID()).
+            Update("balance", gorm.Expr("balance + ?", e.Amount)).
+            Error
+    // ... other events
+    }
+    return nil
+}
+```
+
+### 3. Value Objects
+
+**ALWAYS immutable, with validation:**
+
+```go
+// Money value object
+type Money struct {
+    amount   decimal.Decimal
+    currency string
+}
+
+func NewMoney(amount decimal.Decimal, currency string) (Money, error) {
+    if !isValidCurrency(currency) {
+        return Money{}, ErrInvalidCurrency
+    }
+    return Money{amount: amount, currency: currency}, nil
+}
+
+func (m Money) Amount() decimal.Decimal { return m.amount }
+func (m Money) Currency() string        { return m.currency }
+
+func (m Money) Add(other Money) (Money, error) {
+    if m.currency != other.currency {
+        return Money{}, ErrCurrencyMismatch
+    }
+    return Money{
+        amount:   m.amount.Add(other.amount),
+        currency: m.currency,
+    }, nil
+}
+
+func (m Money) IsZero() bool {
+    return m.amount.IsZero()
+}
+```
+
+### 4. Temporal Workflows
+
+**For complex multi-step operations:**
+
+```go
+import "go.temporal.io/sdk/workflow"
+
+// Workflow definition
+func DepositWorkflow(ctx workflow.Context, input DepositWorkflowInput) error {
+    ao := workflow.ActivityOptions{
+        StartToCloseTimeout: 10 * time.Minute,
+    }
+    ctx = workflow.WithActivityOptions(ctx, ao)
+
+    // Step 1: Process Stripe payment
+    var paymentResult StripePaymentResult
+    err := workflow.ExecuteActivity(ctx, ProcessStripePaymentActivity, input.PaymentIntent).Get(ctx, &paymentResult)
+    if err != nil {
+        return err
+    }
+
+    // Step 2: Credit account
+    var depositResult DepositResult
+    err = workflow.ExecuteActivity(ctx, CreditAccountActivity, CreditAccountInput{
+        AccountID: input.AccountID,
+        Amount:    paymentResult.Amount,
+        Reference: paymentResult.PaymentID,
+    }).Get(ctx, &depositResult)
+    if err != nil {
+        // Compensate: Refund Stripe payment
+        workflow.ExecuteActivity(ctx, RefundStripePaymentActivity, paymentResult.PaymentID)
+        return err
+    }
+
+    // Step 3: Send notification
+    workflow.ExecuteActivity(ctx, SendDepositNotificationActivity, input.UserID)
+
+    return nil
+}
+
+// Activity
+func ProcessStripePaymentActivity(ctx context.Context, paymentIntentID string) (StripePaymentResult, error) {
+    // Call Stripe API
+    // ...
+}
+```
+
+---
+
+## 🧪 Test-Driven Development (TDD)
+
+**MANDATORY:** Write tests BEFORE implementation. Follow Red-Green-Refactor cycle.
+
+### TDD Workflow
+
+```
+1. RED:    Write failing test
+2. GREEN:  Write minimal code to pass
+3. REFACTOR: Clean up code
+4. REPEAT: Next test
+```
+
+### Test Structure
+
+**Every file `foo.go` MUST have `foo_test.go` in the same package:**
+
+```go
+// account_test.go
+package aggregate_test
+
+import (
+    "context"
+    "testing"
+
+    "github.com/stretchr/testify/assert"
+    "github.com/stretchr/testify/require"
+    "github.com/shopspring/decimal"
+)
+
+func TestAccountAggregate_Deposit(t *testing.T) {
+    tests := []struct {
+        name        string
+        initialBalance decimal.Decimal
+        depositAmount  decimal.Decimal
+        expectError    bool
+        expectedBalance decimal.Decimal
+    }{
+        {
+            name:           "successful deposit",
+            initialBalance: decimal.NewFromInt(100),
+            depositAmount:  decimal.NewFromInt(50),
+            expectError:    false,
+            expectedBalance: decimal.NewFromInt(150),
+        },
+        {
+            name:           "deposit zero amount",
+            initialBalance: decimal.NewFromInt(100),
+            depositAmount:  decimal.Zero,
+            expectError:    true,
+        },
+        {
+            name:           "deposit negative amount",
+            initialBalance: decimal.NewFromInt(100),
+            depositAmount:  decimal.NewFromInt(-50),
+            expectError:    true,
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            // Arrange
+            agg := setupAccountAggregate(t, tt.initialBalance)
+            cmd := &DepositCommand{
+                Amount:   tt.depositAmount,
+                Currency: "USD",
+            }
+
+            // Act
+            err := agg.HandleCommand(context.Background(), cmd)
+
+            // Assert
+            if tt.expectError {
+                require.Error(t, err)
+            } else {
+                require.NoError(t, err)
+                assert.Equal(t, tt.expectedBalance, agg.Balance())
+            }
+        })
+    }
+}
+
+func TestAccountProjector_OnDeposited(t *testing.T) {
+    // Test projector updates read model correctly
+    // ...
+}
+```
+
+### Test Coverage Requirements
+
+**BEFORE EVERY COMMIT:**
+
+```bash
+# Run all tests
+go test ./...
+
+# Check coverage (minimum 80%)
+go test -cover ./...
+
+# Generate coverage report
+go test -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out -o coverage.html
+```
+
+**Coverage requirements:**
+- Domain aggregates: **90%+**
+- Domain services: **85%+**
+- Application handlers: **80%+**
+- Infrastructure: **70%+**
+
+### Integration Tests
+
+```go
+// integration_test.go
+//go:build integration
+// +build integration
+
+package integration_test
+
+import (
+    "testing"
+    "github.com/testcontainers/testcontainers-go"
+)
+
+func TestAccountFlow_Integration(t *testing.T) {
+    // Setup test containers
+    ctx := context.Background()
+    postgresContainer := setupPostgres(ctx, t)
+    defer postgresContainer.Terminate(ctx)
+
+    // Run full flow test
+    // ...
+}
+
+func setupPostgres(ctx context.Context, t *testing.T) testcontainers.Container {
+    req := testcontainers.ContainerRequest{
+        Image: "postgres:16-alpine",
+        Env: map[string]string{
+            "POSTGRES_DB": "finaegis_test",
+            "POSTGRES_USER": "test",
+            "POSTGRES_PASSWORD": "test",
+        },
+        ExposedPorts: []string{"5432/tcp"},
+    }
+    container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+        ContainerRequest: req,
+        Started: true,
+    })
+    require.NoError(t, err)
+    return container
+}
+```
+
+**Run integration tests:**
+```bash
+go test -tags=integration ./test/integration/...
+```
+
+---
+
+## ⚡ Atomic Task Execution
+
+**CRITICAL:** Execute tasks atomically with proper validation at each step.
+
+### Atomic Task Workflow
+
+For EVERY task:
+
+```bash
+# 1. Create feature branch
+git checkout -b feature/P{phase}-{domain}-{task-number}
+
+# 2. Write tests FIRST (TDD)
+# Create *_test.go files
+
+# 3. Run tests (should fail - RED)
+go test ./internal/domain/{domain}/...
+
+# 4. Implement minimal code (GREEN)
+# Write actual implementation
+
+# 5. Run tests again (should pass)
+go test ./internal/domain/{domain}/...
+
+# 6. Refactor if needed
+# Clean up code, optimize
+
+# 7. Run ALL tests
+go test ./...
+
+# 8. Check coverage
+go test -cover ./... | grep -E "coverage: [0-9]+\.[0-9]+%"
+
+# 9. Lint code
+golangci-lint run ./internal/domain/{domain}/...
+
+# 10. Build project
+go build ./...
+
+# 11. Manual UI testing (if applicable)
+# Start dev server and test in UI
+
+# 12. Commit with conventional commit message
+git add .
+git commit -m "feat(domain): implement task P{phase}-{task-number}"
+
+# 13. Push to remote
+git push origin feature/P{phase}-{domain}-{task-number}
+```
+
+### Pre-Commit Checklist
+
+**MANDATORY before EVERY commit:**
+
+- [ ] All tests pass (`go test ./...`)
+- [ ] Coverage meets minimum threshold
+- [ ] No linter errors (`golangci-lint run`)
+- [ ] Code builds successfully (`go build ./...`)
+- [ ] Integration tests pass (if applicable)
+- [ ] Manual UI testing completed (if UI changes)
+- [ ] Synthetic data generated (if new entity)
+
+---
+
+## 🎨 UI Integration & Manual Testing
+
+### Development Server
+
+```bash
+# Start all services
+make dev
+
+# Start API server
+make run-api
+
+# Start UI dev server (if separate)
+cd ui && npm run dev
+```
+
+### UI Testing Guidelines
+
+**For every user-facing feature:**
+
+1. **Create UI components** in `ui/src/components/{domain}/`
+2. **Add routes** in `ui/src/routes/`
+3. **Test manually** with synthetic data
+4. **Document** in `docs/ui/{domain}.md`
+
+### Example: Account UI Testing
+
+```typescript
+// ui/src/components/account/AccountList.tsx
+import { useQuery } from '@tanstack/react-query'
+import { accountApi } from '@/api/account'
+
+export function AccountList() {
+  const { data: accounts, isLoading } = useQuery({
+    queryKey: ['accounts'],
+    queryFn: accountApi.list
+  })
+
+  if (isLoading) return <div>Loading...</div>
+
+  return (
+    <div>
+      {accounts?.map(account => (
+        <AccountCard key={account.id} account={account} />
+      ))}
+    </div>
+  )
+}
+```
+
+**Manual test checklist:**
+- [ ] List accounts displays correctly
+- [ ] Create account form validates properly
+- [ ] Deposit transaction updates balance in real-time
+- [ ] Error states display user-friendly messages
+- [ ] Loading states show appropriate spinners
+
+---
+
+## 🎭 Synthetic Data Generation
+
+**ALWAYS generate realistic test data for manual testing.**
+
+### Seed Data Scripts
+
+Create seed scripts in `scripts/seed/`:
+
+```go
+// scripts/seed/accounts.go
+package main
+
+import (
+    "context"
+    "fmt"
+    "github.com/brianvoe/gofakeit/v6"
+    "github.com/shopspring/decimal"
+)
+
+func seedAccounts(ctx context.Context, count int) error {
+    for i := 0; i < count; i++ {
+        account := &AccountProjection{
+            ID:       uuid.New(),
+            TenantID: tenantID,
+            UserID:   uuid.New(),
+            Balance:  decimal.NewFromFloat(gofakeit.Float64Range(100, 10000)),
+            Currency: gofakeit.RandomString([]string{"USD", "EUR", "GBP", "AED"}),
+            Status:   "active",
+            CreatedAt: gofakeit.DateRange(
+                time.Now().AddDate(0, -6, 0),
+                time.Now(),
+            ),
+        }
+
+        if err := db.Create(account).Error; err != nil {
+            return err
+        }
+
+        // Generate transactions
+        seedTransactions(ctx, account.ID, gofakeit.IntRange(10, 50))
+    }
+
+    return nil
+}
+
+func seedTransactions(ctx context.Context, accountID uuid.UUID, count int) error {
+    types := []string{"deposit", "withdrawal", "transfer"}
+
+    for i := 0; i < count; i++ {
+        tx := &TransactionProjection{
+            ID:        uuid.New(),
+            AccountID: accountID,
+            Type:      gofakeit.RandomString(types),
+            Amount:    decimal.NewFromFloat(gofakeit.Float64Range(10, 1000)),
+            Status:    "completed",
+            CreatedAt: gofakeit.DateRange(
+                time.Now().AddDate(0, -3, 0),
+                time.Now(),
+            ),
+        }
+
+        if err := db.Create(tx).Error; err != nil {
+            return err
+        }
+    }
+
+    return nil
+}
+```
+
+### Seed Command
+
+```bash
+# Generate seed data
+go run scripts/seed/main.go --accounts 100 --transactions 1000
+
+# Reset and reseed
+go run scripts/seed/main.go --reset --accounts 50
+```
+
+### Realistic Data Requirements
+
+**Use gofakeit for realistic data:**
+
+```go
+import "github.com/brianvoe/gofakeit/v6"
+
+// Names
+gofakeit.Name()                    // "John Smith"
+gofakeit.Email()                   // "john.smith@example.com"
+
+// Financial
+gofakeit.CreditCardNumber()        // "4532123456789012"
+gofakeit.CreditCardCvv()           // "123"
+gofakeit.Price(10, 1000)           // 245.67
+
+// Addresses
+gofakeit.Address().Address         // "123 Main St"
+gofakeit.City()                    // "New York"
+gofakeit.Country()                 // "United States"
+
+// Dates
+gofakeit.DateRange(start, end)     // Random date in range
+gofakeit.PastDate()                // Date in the past
+
+// Custom
+gofakeit.RandomString([]string{"USD", "EUR", "GBP"})
+```
+
+---
+
+## 📝 Context Management for AI Agents
+
+### Session Context File
+
+**Create `.ai-context.md` in project root:**
+
+```markdown
+# AI Agent Context - FinAegis Golang Migration
+
+## Current Phase
+Phase 2: Account Domain
+
+## Current Task
+Task 2.3: Account Command Handlers
+- Status: In Progress
+- File: internal/domain/account/handler/command_handler.go
+- Tests: internal/domain/account/handler/command_handler_test.go
+
+## Recently Completed
+- [x] Task 2.1: Account Aggregate (2024-01-01)
+- [x] Task 2.2: Account Commands (2024-01-01)
+
+## Next Tasks
+- [ ] Task 2.4: Account Projections
+- [ ] Task 2.5: Account Queries
+
+## Active Branches
+- feature/P2-account-003 (current)
+- feature/P1-foundation-012 (merged)
+
+## Known Issues
+- None
+
+## Important Notes
+- Using Event Horizon v0.16.0
+- PostgreSQL 16 with GORM
+- Temporal workflows for saga patterns
+- Multi-tenancy: tenant_id in all projections
+
+## Quick Commands
+```bash
+# Run account tests
+go test ./internal/domain/account/...
+
+# Start dev environment
+make dev
+
+# Seed account data
+go run scripts/seed/main.go --accounts 50
+```
+
+## Last Updated
+2024-01-01 14:30:00
+```
+
+### Completion Context
+
+**After each task, update `.ai-context.md`:**
+
+```bash
+# Automated context update script
+cat >> .ai-context.md << EOF
+
+---
+## Task Completion: $(date)
+
+**Task:** P2-ACCOUNT-003
+**Status:** ✅ Completed
+**Files Modified:**
+- internal/domain/account/handler/command_handler.go
+- internal/domain/account/handler/command_handler_test.go
+
+**Test Results:**
+- Tests passed: 15/15
+- Coverage: 92%
+
+**Manual Testing:**
+- ✅ Create account via UI
+- ✅ Deposit funds
+- ✅ Withdraw funds
+- ✅ View transaction history
+
+**Next Task:** P2-ACCOUNT-004 (Account Projections)
+
+EOF
+```
+
+### Read Context Before Starting
+
+**ALWAYS read `.ai-context.md` before starting new work:**
+
+1. Check current phase and task
+2. Review recently completed tasks
+3. Check for known issues
+4. Verify dependencies are met
+5. Update context after completion
+
+---
+
+## 🚀 Coding Standards
+
+### Go Code Style
+
+**Follow Effective Go and these additional rules:**
+
+```go
+// ✅ GOOD: Clear variable names
+func calculateTotalBalance(accounts []Account) decimal.Decimal {
+    total := decimal.Zero
+    for _, account := range accounts {
+        total = total.Add(account.Balance)
+    }
+    return total
+}
+
+// ❌ BAD: Unclear abbreviations
+func calcTot(accs []Account) decimal.Decimal {
+    t := decimal.Zero
+    for _, a := range accs {
+        t = t.Add(a.Bal)
+    }
+    return t
+}
+
+// ✅ GOOD: Early returns
+func validateDeposit(amount decimal.Decimal) error {
+    if amount.LessThanOrEqual(decimal.Zero) {
+        return ErrInvalidAmount
+    }
+    if amount.GreaterThan(maxDepositAmount) {
+        return ErrAmountTooLarge
+    }
+    return nil
+}
+
+// ❌ BAD: Nested if statements
+func validateDeposit(amount decimal.Decimal) error {
+    if amount.GreaterThan(decimal.Zero) {
+        if amount.LessThanOrEqual(maxDepositAmount) {
+            return nil
+        } else {
+            return ErrAmountTooLarge
+        }
+    } else {
+        return ErrInvalidAmount
+    }
+}
+
+// ✅ GOOD: Interface segregation
+type AccountReader interface {
+    GetAccount(ctx context.Context, id uuid.UUID) (*Account, error)
+}
+
+type AccountWriter interface {
+    CreateAccount(ctx context.Context, cmd *CreateAccountCommand) error
+}
+
+// ❌ BAD: God interface
+type AccountService interface {
+    GetAccount(ctx context.Context, id uuid.UUID) (*Account, error)
+    CreateAccount(ctx context.Context, cmd *CreateAccountCommand) error
+    UpdateAccount(ctx context.Context, cmd *UpdateAccountCommand) error
+    DeleteAccount(ctx context.Context, id uuid.UUID) error
+    ListAccounts(ctx context.Context) ([]*Account, error)
+    // ... 20 more methods
+}
+```
+
+### Error Handling
+
+```go
+// ✅ GOOD: Wrap errors with context
+if err := repo.Save(ctx, account); err != nil {
+    return fmt.Errorf("failed to save account %s: %w", account.ID, err)
+}
+
+// ✅ GOOD: Custom error types
+var (
+    ErrAccountNotFound = errors.New("account not found")
+    ErrInsufficientFunds = errors.New("insufficient funds")
+    ErrAccountFrozen = errors.New("account is frozen")
+)
+
+type ValidationError struct {
+    Field   string
+    Message string
+}
+
+func (e *ValidationError) Error() string {
+    return fmt.Sprintf("%s: %s", e.Field, e.Message)
+}
+
+// ✅ GOOD: Error checking
+account, err := repo.GetAccount(ctx, accountID)
+if err != nil {
+    if errors.Is(err, ErrAccountNotFound) {
+        return nil, status.Error(codes.NotFound, "account not found")
+    }
+    return nil, status.Error(codes.Internal, "internal error")
+}
+```
+
+### Logging
+
+```go
+import "go.uber.org/zap"
+
+// ✅ GOOD: Structured logging
+logger.Info("account created",
+    zap.String("account_id", accountID.String()),
+    zap.String("tenant_id", tenantID.String()),
+    zap.String("currency", currency),
+)
+
+logger.Error("failed to process deposit",
+    zap.String("account_id", accountID.String()),
+    zap.String("amount", amount.String()),
+    zap.Error(err),
+)
+
+// ❌ BAD: Unstructured logging
+log.Printf("Account created: %s", accountID)
+log.Printf("Error: %v", err)
+```
+
+### Naming Conventions
+
+```go
+// Packages: lowercase, single word
+package account
+package payment
+
+// Files: snake_case
+account_aggregate.go
+deposit_command.go
+
+// Types: PascalCase
+type AccountAggregate struct {}
+type DepositCommand struct {}
+
+// Interfaces: -er suffix
+type AccountRepository interface {}
+type EventPublisher interface {}
+
+// Constants: PascalCase or SCREAMING_SNAKE_CASE
+const MaxDepositAmount = 1000000
+const DEFAULT_CURRENCY = "USD"
+
+// Variables: camelCase
+var accountID uuid.UUID
+var depositAmount decimal.Decimal
+
+// Functions: camelCase (private), PascalCase (public)
+func calculateBalance() {}
+func ValidateAccount() {}
+```
+
+---
+
+## 🔒 Security Best Practices
+
+### Input Validation
+
+```go
+// ✅ ALWAYS validate input
+func (h *CreateAccountHandler) Handle(ctx context.Context, cmd *CreateAccountCommand) error {
+    // Validate tenant ID
+    if cmd.TenantID == uuid.Nil {
+        return &ValidationError{Field: "tenant_id", Message: "required"}
+    }
+
+    // Validate currency
+    if !isValidCurrency(cmd.Currency) {
+        return &ValidationError{Field: "currency", Message: "invalid currency code"}
+    }
+
+    // Validate amount constraints
+    if cmd.InitialBalance.LessThan(decimal.Zero) {
+        return &ValidationError{Field: "initial_balance", Message: "cannot be negative"}
+    }
+
+    // ... handle command
+}
+```
+
+### Secrets Management
+
+```go
+// ✅ GOOD: Use environment variables
+stripeKey := os.Getenv("STRIPE_SECRET_KEY")
+if stripeKey == "" {
+    return errors.New("STRIPE_SECRET_KEY not set")
+}
+
+// ❌ BAD: Hardcoded secrets
+stripeKey := "sk_test_1234567890abcdef"
+```
+
+### SQL Injection Prevention
+
+```go
+// ✅ GOOD: Use parameterized queries with GORM
+db.Where("account_id = ? AND status = ?", accountID, "active").Find(&transactions)
+
+// ❌ BAD: String concatenation
+db.Where(fmt.Sprintf("account_id = '%s'", accountID)).Find(&transactions)
+```
+
+### Authentication & Authorization
+
+```go
+// ✅ GOOD: Check tenant isolation
+func (h *GetAccountHandler) Handle(ctx context.Context, query *GetAccountQuery) (*Account, error) {
+    // Extract tenant from JWT
+    tenantID := GetTenantFromContext(ctx)
+
+    var account AccountProjection
+    err := h.db.Where("id = ? AND tenant_id = ?", query.AccountID, tenantID).First(&account).Error
+    if err != nil {
+        return nil, err
+    }
+
+    return &account, nil
+}
+```
+
+---
+
+## 📊 Performance Optimization
+
+### Database Indexes
+
+```go
+// ✅ ALWAYS add indexes for frequent queries
+type AccountProjection struct {
+    ID        uuid.UUID `gorm:"primaryKey"`
+    TenantID  uuid.UUID `gorm:"index:idx_tenant_user,priority:1"`
+    UserID    uuid.UUID `gorm:"index:idx_tenant_user,priority:2"`
+    Status    string    `gorm:"index"`
+    CreatedAt time.Time `gorm:"index"`
+}
+
+// Composite index
+type TransactionProjection struct {
+    ID        uuid.UUID `gorm:"primaryKey"`
+    AccountID uuid.UUID `gorm:"index:idx_account_created,priority:1"`
+    CreatedAt time.Time `gorm:"index:idx_account_created,priority:2"`
+}
+```
+
+### Caching
+
+```go
+import "github.com/redis/go-redis/v9"
+
+// ✅ Cache frequently accessed data
+func (r *AccountRepository) GetAccount(ctx context.Context, id uuid.UUID) (*Account, error) {
+    // Check cache first
+    cacheKey := fmt.Sprintf("account:%s", id)
+    cached, err := r.redis.Get(ctx, cacheKey).Result()
+    if err == nil {
+        var account Account
+        json.Unmarshal([]byte(cached), &account)
+        return &account, nil
+    }
+
+    // Cache miss - fetch from DB
+    var account AccountProjection
+    err = r.db.First(&account, "id = ?", id).Error
+    if err != nil {
+        return nil, err
+    }
+
+    // Update cache
+    data, _ := json.Marshal(account)
+    r.redis.Set(ctx, cacheKey, data, 5*time.Minute)
+
+    return &account, nil
+}
+```
+
+### Batch Operations
+
+```go
+// ✅ GOOD: Batch insert
+func (r *TransactionRepository) CreateBatch(ctx context.Context, txs []*Transaction) error {
+    return r.db.CreateInBatches(txs, 100).Error
+}
+
+// ❌ BAD: Individual inserts in loop
+func (r *TransactionRepository) CreateBatch(ctx context.Context, txs []*Transaction) error {
+    for _, tx := range txs {
+        if err := r.db.Create(tx).Error; err != nil {
+            return err
+        }
+    }
+    return nil
+}
+```
+
+---
+
+## 🎯 Quick Reference Commands
+
+### Development
+
+```bash
+# Install dependencies
+go mod download
+
+# Install tools
+make install-tools
+
+# Start development environment
+make dev
+
+# Run API server
+make run-api
+
+# Run CLI
+go run cmd/cli/main.go account create --name "Test Account"
+
+# Hot reload (air)
+air
+```
+
+### Testing
+
+```bash
+# Run all tests
+go test ./...
+
+# Run specific package
+go test ./internal/domain/account/...
+
+# Run with coverage
+go test -cover ./...
+
+# Generate coverage report
+go test -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out
+
+# Run integration tests
+go test -tags=integration ./test/integration/...
+
+# Run benchmarks
+go test -bench=. ./internal/domain/account/...
+
+# Verbose output
+go test -v ./...
+```
+
+### Code Quality
+
+```bash
+# Lint code
+golangci-lint run
+
+# Format code
+gofmt -s -w .
+
+# Check for race conditions
+go test -race ./...
+
+# Security scan
+gosec ./...
+
+# Vulnerability check
+govulncheck ./...
+
+# Generate mocks
+mockgen -source=internal/domain/account/repository/repository.go -destination=test/mocks/account_repository_mock.go
+```
+
+### Database
+
+```bash
+# Run migrations
+make migrate-up
+
+# Rollback migration
+make migrate-down
+
+# Create new migration
+migrate create -ext sql -dir migrations -seq create_accounts_table
+
+# Seed data
+go run scripts/seed/main.go --accounts 100
+```
+
+### Docker
+
+```bash
+# Build images
+docker-compose build
+
+# Start services
+docker-compose up -d
+
+# View logs
+docker-compose logs -f api-server
+
+# Stop services
+docker-compose down
+
+# Clean volumes
+docker-compose down -v
+```
+
+---
+
+## 🚨 Common Pitfalls & Solutions
+
+### Pitfall 1: Mutating State in Command Handlers
+
+```go
+// ❌ BAD
+func (a *AccountAggregate) HandleDeposit(cmd *DepositCommand) error {
+    a.balance = a.balance.Add(cmd.Amount)  // DON'T mutate directly!
+    return nil
+}
+
+// ✅ GOOD
+func (a *AccountAggregate) HandleDeposit(cmd *DepositCommand) error {
+    a.AppendEvent(DepositedEventType, &DepositedEvent{
+        Amount: cmd.Amount,
+    }, time.Now())
+    return nil  // Mutation happens in ApplyEvent
+}
+```
+
+### Pitfall 2: Forgetting Tenant Isolation
+
+```go
+// ❌ BAD: Missing tenant filter
+db.Where("user_id = ?", userID).Find(&accounts)
+
+// ✅ GOOD: Always filter by tenant
+tenantID := GetTenantFromContext(ctx)
+db.Where("tenant_id = ? AND user_id = ?", tenantID, userID).Find(&accounts)
+```
+
+### Pitfall 3: Not Handling Decimal Precision
+
+```go
+// ❌ BAD: Using float64 for money
+balance := 100.10 + 0.20  // = 100.30000000000001
+
+// ✅ GOOD: Use decimal.Decimal
+balance := decimal.NewFromFloat(100.10).Add(decimal.NewFromFloat(0.20))
+```
+
+### Pitfall 4: Missing Error Context
+
+```go
+// ❌ BAD
+if err != nil {
+    return err
+}
+
+// ✅ GOOD
+if err != nil {
+    return fmt.Errorf("failed to create account for user %s: %w", userID, err)
+}
+```
+
+---
+
+## 📚 Essential Libraries
+
+```go
+// Event Sourcing
+"github.com/looplab/eventhorizon"
+
+// Database ORM
+"gorm.io/gorm"
+"gorm.io/driver/postgres"
+
+// Decimal arithmetic
+"github.com/shopspring/decimal"
+
+// HTTP framework
+"github.com/gin-gonic/gin"
+
+// UUID
+"github.com/google/uuid"
+
+// Temporal workflows
+"go.temporal.io/sdk/workflow"
+"go.temporal.io/sdk/client"
+
+// Logging
+"go.uber.org/zap"
+
+// Configuration
+"github.com/spf13/viper"
+
+// Testing
+"github.com/stretchr/testify/assert"
+"github.com/stretchr/testify/require"
+"github.com/stretchr/testify/mock"
+
+// Fake data
+"github.com/brianvoe/gofakeit/v6"
+
+// Redis
+"github.com/redis/go-redis/v9"
+
+// OpenTelemetry
+"go.opentelemetry.io/otel"
+"go.opentelemetry.io/otel/trace"
+
+// Prometheus
+"github.com/prometheus/client_golang/prometheus"
+```
+
+---
+
+## 🎓 Learning Resources
+
+### Read These First
+
+1. **Event Horizon Documentation**: https://github.com/looplab/eventhorizon
+2. **CQRS Journey**: https://docs.microsoft.com/en-us/previous-versions/msp-n-p/jj554200(v=pandp.10)
+3. **Domain-Driven Design**: Evans, Eric. "Domain-Driven Design"
+4. **Temporal Workflows**: https://docs.temporal.io/
+
+### Code Examples
+
+Check `examples/` directory for:
+- Complete aggregate implementation
+- CQRS handler examples
+- Temporal workflow patterns
+- Testing strategies
+
+---
+
+## ✅ Final Checklist for Every Task
+
+**Before marking task complete:**
+
+- [ ] Tests written FIRST (TDD)
+- [ ] All tests pass (`go test ./...`)
+- [ ] Coverage ≥ 80% (`go test -cover ./...`)
+- [ ] No linter errors (`golangci-lint run`)
+- [ ] Code builds (`go build ./...`)
+- [ ] Integration tests pass (if applicable)
+- [ ] Manual UI testing completed
+- [ ] Synthetic data generated
+- [ ] Documentation updated
+- [ ] `.ai-context.md` updated
+- [ ] Committed with conventional commit
+- [ ] Pushed to remote branch
+
+---
+
+**REMEMBER:**
+- ✅ Tests first (TDD)
+- ✅ Atomic commits
+- ✅ Event sourcing for all state changes
+- ✅ CQRS for read/write separation
+- ✅ Multi-tenancy always
+- ✅ Decimal for money
+- ✅ Context management
+
+**Last Updated:** 2026-01-01
+**Migration Plan:** See `GOLANG_MIGRATION_TASKS.md`
