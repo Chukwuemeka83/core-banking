@@ -44,14 +44,33 @@
 
 ### **Critical Directives**
 
-1. ✅ **Hybrid Decision**: Financial operations → Formance, Non-financial workflows → Event Horizon
-2. ✅ Use Formance APIs for ALL financial wallet operations (NO balance in Postgres)
-3. ✅ Use Event Horizon aggregates for compliance, KYC, governance, AI workflows
-4. ✅ Use Ory Kratos UUIDs as FK (NO password storage)
-5. ✅ Use Ory Keto for ALL permissions (two-layer fallback)
-6. ✅ Schema isolation via middleware (SET search_path per request)
-7. ✅ Control Plane NEVER accesses Tenant Plane data
-8. ✅ Event store tables in each tenant schema (for Event Horizon domains)
+**🔌 Hexagonal Architecture (Ports & Adapters):**
+1. ✅ **Domain depends on INTERFACES**, not vendor SDKs
+2. ✅ **Ports (interfaces) defined BY domain** in `domain/**/ports/`
+3. ✅ **Adapters implement interfaces** in `infrastructure/adapters/`
+4. ❌ **Domain NEVER imports vendor packages** (`github.com/formancehq/*`, `github.com/ory/*`)
+5. ❌ **Domain NEVER imports infrastructure** (`internal/infrastructure/*`)
+6. ✅ **Adapters are pluggable** - switch vendors without changing business logic
+
+**Hybrid Event Strategy:**
+7. ✅ **Financial operations** → Use `LedgerService` interface (default: Formance adapter)
+8. ✅ **Non-financial workflows** → Use `EventStore` interface (default: Event Horizon adapter)
+9. ✅ **Wallet operations** → Use `WalletService` interface (default: Formance adapter)
+
+**Security & Identity (Abstracted):**
+10. ✅ Use `IdentityProvider` interface (default: Ory Kratos adapter)
+11. ✅ Use `AuthorizationProvider` interface (default: Ory Keto adapter)
+12. ✅ Use `APIGateway` interface (default: Ory Oathkeeper adapter)
+
+**Multi-Tenancy:**
+13. ✅ Schema isolation via middleware (SET search_path per request)
+14. ✅ Control Plane NEVER accesses Tenant Plane data
+15. ✅ All entities tenant-scoped (no global tables)
+
+**Testing & Flexibility:**
+16. ✅ Provide in-memory adapters for testing (no external dependencies)
+17. ✅ Configuration-based adapter selection (env vars, DI container)
+18. ✅ Can run multiple adapters simultaneously during migration
 
 ---
 
@@ -137,21 +156,53 @@ finaegis-go/
 │   │   │   ├── query/          # Queries (read operations)
 │   │   │   ├── valueobject/    # Value objects (immutable)
 │   │   │   ├── service/        # Domain services
+│   │   │   ├── ports/          # 🔌 INTERFACES (defined BY domain!)
+│   │   │   │   ├── wallet.go   # type WalletService interface
+│   │   │   │   ├── ledger.go   # type LedgerService interface
+│   │   │   │   ├── authz.go    # type AuthorizationProvider interface
+│   │   │   │   └── identity.go # type IdentityProvider interface
 │   │   │   ├── projection/     # Read models (CQRS)
 │   │   │   ├── projector/      # Event handlers → projections
 │   │   │   ├── workflow/       # Temporal workflows
 │   │   │   └── repository/     # Repository interfaces
 │   │   └── shared/             # Shared kernel
+│   │       └── ports/          # Shared interfaces (EventStore, EventBus, etc.)
 │   ├── application/            # Application layer
 │   │   ├── handler/           # Command/query handlers
 │   │   └── service/           # Application services
 │   ├── infrastructure/         # Infrastructure layer
-│   │   ├── eventstore/        # Event Horizon implementation (non-financial)
-│   │   ├── formance/          # Formance SDK clients (financial)
-│   │   ├── ory/               # Ory SDK clients (Kratos, Keto, Oathkeeper)
+│   │   ├── adapters/          # 🔌 VENDOR ADAPTERS (Hexagonal Architecture)
+│   │   │   ├── wallet/        # WalletService implementations
+│   │   │   │   ├── formance_wallet_adapter.go
+│   │   │   │   ├── tigerbeetle_wallet_adapter.go
+│   │   │   │   └── inmemory_wallet_adapter.go (for testing)
+│   │   │   ├── ledger/        # LedgerService implementations
+│   │   │   │   ├── formance_ledger_adapter.go
+│   │   │   │   ├── custom_ledger_adapter.go
+│   │   │   │   └── inmemory_ledger_adapter.go
+│   │   │   ├── authz/         # AuthorizationProvider implementations
+│   │   │   │   ├── ory_keto_adapter.go
+│   │   │   │   ├── casbin_adapter.go
+│   │   │   │   └── inmemory_authz_adapter.go
+│   │   │   ├── identity/      # IdentityProvider implementations
+│   │   │   │   ├── ory_kratos_adapter.go
+│   │   │   │   ├── auth0_adapter.go
+│   │   │   │   └── keycloak_adapter.go
+│   │   │   ├── eventstore/    # EventStore implementations
+│   │   │   │   ├── eventhorizon_adapter.go
+│   │   │   │   ├── eventstoredb_adapter.go
+│   │   │   │   └── postgres_eventstore_adapter.go
+│   │   │   ├── gateway/       # APIGateway implementations
+│   │   │   │   ├── ory_oathkeeper_adapter.go
+│   │   │   │   ├── kong_adapter.go
+│   │   │   │   └── envoy_adapter.go
+│   │   │   └── workflow/      # WorkflowOrchestrator implementations
+│   │   │       ├── temporal_adapter.go
+│   │   │       └── cadence_adapter.go
 │   │   ├── persistence/       # GORM repositories (read models)
 │   │   ├── http/              # Gin HTTP handlers
-│   │   ├── temporal/          # Temporal client (workflows)
+│   │   ├── config/            # DI container, adapter wiring
+│   │   │   └── container.go   # Configuration-based adapter selection
 │   │   └── external/          # External API clients
 │   └── api/                   # API contracts (OpenAPI)
 ├── pkg/                        # Public libraries
