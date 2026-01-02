@@ -716,3 +716,351 @@ func TenantProvisioningWorkflow(ctx workflow.Context, input TenantProvisioningIn
 
 **Status:** Ready for task update phase
 **Estimated Effort:** ~40 hours to update all documentation
+
+---
+
+## 🔄 REVISED: Hybrid Event Sourcing Strategy
+
+> **Date:** 2026-01-01 (Updated)
+> **Decision:** After architectural review, adopting HYBRID approach
+
+### **Why Hybrid is Superior**
+
+**Initial Plan:** Replace Event Horizon with Formance everywhere
+**Problem:** Not all domains are financial - some need flexible event sourcing for audit/compliance
+**Solution:** Use the right tool for each domain type
+
+---
+
+## Domain Classification
+
+### **Class A: Financial Domains → Formance**
+
+**Use Formance Ledger + Wallets for money operations:**
+
+| Domain | Why Formance |
+|--------|--------------|
+| **Account Balances** | Multi-asset wallets, holds/reserves, real-time balances |
+| **Payment Transactions** | Double-entry guaranteed, immutable ledger, compliance-ready |
+| **Exchange Trades** | Atomic settlement, order matching, trade audit |
+| **Lending Repayments** | Loan schedules, interest calculation, payment tracking |
+| **Treasury Movements** | Portfolio allocations, yield tracking, rebalancing |
+| **Stablecoin Operations** | Minting/burning, collateral management, reserve tracking |
+
+**Benefits:**
+- ✅ Financial correctness guaranteed (battle-tested)
+- ✅ Double-entry bookkeeping enforced (impossible to break)
+- ✅ Real-time balances (no event replay lag)
+- ✅ Compliance audit trails (SOC 2, PCI-DSS certified)
+- ✅ Multi-asset out-of-box (USD, EUR, BTC, ETH, etc.)
+- ✅ 0 lines of ledger code to maintain
+
+---
+
+### **Class B: Non-Financial Domains → Event Horizon**
+
+**Use Event Horizon for workflow/audit event sourcing:**
+
+| Domain | Why Event Horizon |
+|--------|-------------------|
+| **Compliance Alerts** | Investigation workflow, regulatory audit trail, flexible logic |
+| **KYC Verification** | Document workflow, multi-step approval, decision history |
+| **AML Monitoring** | Transaction analysis, pattern detection, case management |
+| **Fraud Detection** | Case investigation, evidence collection, resolution tracking |
+| **Governance Votes** | Tamper-proof voting, proposal lifecycle, transparency |
+| **AI Agent Decisions** | Model predictions, action history, explainability |
+| **Audit Logs** | System events, user actions, security trail |
+
+**Benefits:**
+- ✅ Complete audit trail for regulators
+- ✅ Can answer "who made this decision and when?"
+- ✅ Flexible business logic (not constrained to financial primitives)
+- ✅ Compliance-ready (GDPR, SOC 2 audit requirements)
+- ✅ Event replay for debugging/analysis
+- ✅ CQRS read models for complex queries
+
+---
+
+## Hybrid Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     TENANT PLANE                             │
+├─────────────────────────────────────────────────────────────┤
+│                                                               │
+│  ┌─────────────────────┐      ┌─────────────────────┐       │
+│  │  Financial Domains  │      │ Non-Financial       │       │
+│  │  (Formance-Based)   │      │ Domains             │       │
+│  │                     │      │ (Event Horizon)     │       │
+│  ├─────────────────────┤      ├─────────────────────┤       │
+│  │ • Account Balances  │      │ • Compliance Alerts │       │
+│  │ • Payments          │      │ • KYC Verification  │       │
+│  │ • Exchange Trades   │      │ • AML Monitoring    │       │
+│  │ • Lending Loans     │      │ • Fraud Cases       │       │
+│  │ • Treasury          │      │ • Governance Votes  │       │
+│  │ • Stablecoin Ops    │      │ • AI Decisions      │       │
+│  └─────────┬───────────┘      └──────────┬──────────┘       │
+│            │                             │                   │
+│            ▼                             ▼                   │
+│  ┌─────────────────────┐      ┌─────────────────────┐       │
+│  │  Formance Ledger    │      │  Event Store        │       │
+│  │  (Immutable Log)    │      │  (PostgreSQL)       │       │
+│  └─────────────────────┘      └─────────────────────┘       │
+│            │                             │                   │
+│            ▼                             ▼                   │
+│  ┌─────────────────────┐      ┌─────────────────────┐       │
+│  │  Formance Wallets   │      │  Projections        │       │
+│  │  (Real-time Balance)│      │  (Read Models)      │       │
+│  └─────────────────────┘      └─────────────────────┘       │
+│                                                               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Implementation Patterns
+
+### **Pattern 1: Financial Operation (Formance)**
+
+```go
+// Payment Service - Uses Formance
+type PaymentService struct {
+    formanceClient *formance.Client
+    walletRepo     WalletRepository
+}
+
+func (s *PaymentService) ProcessDeposit(ctx context.Context, cmd DepositCommand) error {
+    // Get wallet mapping
+    wallet, _ := s.walletRepo.GetByID(ctx, cmd.WalletID)
+
+    // Formance handles event sourcing internally
+    _, err := s.formanceClient.Wallets.Credit(ctx, &formance.CreditRequest{
+        WalletID: wallet.FormanceWalletID,
+        Amount: &formance.Monetary{
+            Asset:  cmd.Currency,
+            Amount: cmd.Amount.IntPart(),
+        },
+        Metadata: map[string]string{
+            "deposit_id": cmd.DepositID.String(),
+            "source":     "bank_transfer",
+        },
+    })
+
+    // Formance automatically:
+    // - Creates immutable ledger entry
+    // - Updates wallet balance
+    // - Ensures double-entry
+    // - Provides audit trail
+
+    return err
+}
+```
+
+### **Pattern 2: Compliance Operation (Event Horizon)**
+
+```go
+// Compliance Service - Uses Event Horizon
+type ComplianceService struct {
+    eventStore eventhorizon.AggregateStore
+    eventBus   eventhorizon.EventBus
+}
+
+func (s *ComplianceService) CreateAlert(ctx context.Context, cmd CreateAlertCommand) error {
+    // Event Horizon aggregate
+    alert := NewComplianceAlertAggregate(uuid.New())
+
+    // Business logic emits events
+    if err := alert.HandleCommand(ctx, cmd); err != nil {
+        return err
+    }
+
+    // Persist to event store
+    if err := s.eventStore.Save(ctx, alert); err != nil {
+        return err
+    }
+
+    // Events are published for projectors
+    return nil
+}
+
+// Aggregate applies events to rebuild state
+func (a *ComplianceAlertAggregate) ApplyAlertCreatedEvent(evt AlertCreatedEvent) {
+    a.alertType = evt.AlertType
+    a.severity = evt.Severity
+    a.status = AlertStatusPending
+    a.createdAt = evt.Timestamp
+}
+```
+
+### **Pattern 3: Mixed Operation (Both)**
+
+```go
+// Transfer money (Formance) + Create audit trail (Event Horizon)
+func (s *TransferService) ExecuteTransfer(ctx context.Context, cmd TransferCommand) error {
+    // 1. Execute financial transfer via Formance
+    _, err := s.formanceClient.Transfers.Create(ctx, &formance.TransferRequest{
+        SourceWalletID: cmd.FromWalletID,
+        DestWalletID:   cmd.ToWalletID,
+        Amount: &formance.Monetary{
+            Asset:  cmd.Currency,
+            Amount: cmd.Amount.IntPart(),
+        },
+    })
+    if err != nil {
+        return err
+    }
+
+    // 2. Create audit log via Event Horizon (for compliance)
+    auditLog := NewAuditLogAggregate(uuid.New())
+    auditLog.RecordTransfer(TransferRecordedEvent{
+        TransferID:     cmd.TransferID,
+        FromWalletID:   cmd.FromWalletID,
+        ToWalletID:     cmd.ToWalletID,
+        Amount:         cmd.Amount,
+        Currency:       cmd.Currency,
+        InitiatedBy:    cmd.UserID,
+        ApprovedBy:     cmd.ApproverID,
+        ComplianceNote: "Transfer approved by compliance officer",
+    })
+    s.auditEventStore.Save(ctx, auditLog)
+
+    return nil
+}
+```
+
+---
+
+## Revised Task Structure
+
+### **Updated Phase Breakdown**
+
+| Phase | Domain | Approach | Tasks | Hours |
+|-------|--------|----------|-------|-------|
+| 0 | Infrastructure | Both | 10 | 96 |
+| 1 | Control Plane | N/A | 8 | 84 |
+| 2 | Ory Stack | N/A | 12 | 120 |
+| 3 | Formance Integration | Formance | 10 | 100 |
+| 4 | Event Horizon Setup | Event Horizon | 8 | 64 |
+| 5 | Schema Isolation | N/A | 6 | 48 |
+| 6 | Account Domain | **Hybrid** | 10 | 100 |
+| 7 | Payment Domain | **Formance** | 10 | 100 |
+| 8 | Compliance Domain | **Event Horizon** | 20 | 220 |
+| 9 | Exchange Domain | **Formance** | 12 | 140 |
+| 10 | Treasury Domain | **Formance** | 14 | 180 |
+| 11 | Lending Domain | **Formance** | 10 | 120 |
+| 12 | Stablecoin Domain | **Formance** | 9 | 110 |
+| 13 | KYC/AML Domain | **Event Horizon** | 12 | 140 |
+| 14 | Fraud Detection | **Event Horizon** | 8 | 96 |
+| 15 | Governance Domain | **Event Horizon** | 10 | 120 |
+| 16 | AI Domain | **Event Horizon** | 9 | 110 |
+| 17 | Monitoring | Mixed | 13 | 142 |
+| **TOTAL** | **All** | **Hybrid** | **191** | **2,290** |
+
+**Key Changes:**
+- ✅ Added Event Horizon setup (Phase 4)
+- ✅ Compliance, KYC/AML, Fraud, Governance use Event Horizon
+- ✅ Account domain is hybrid (balances via Formance, membership via Event Horizon)
+- ✅ Financial domains use Formance
+- ✅ Total: 191 tasks, 2,290 hours (~57 weeks)
+
+---
+
+## Technology Stack (Final)
+
+| Component | Technology | Used For |
+|-----------|------------|----------|
+| **Financial Ledger** | Formance Ledger | Account, Payment, Exchange, Lending, Treasury, Stablecoin |
+| **Wallet Management** | Formance Wallets | Multi-asset balances, holds/reserves |
+| **Non-Financial Events** | Event Horizon | Compliance, KYC, Fraud, Governance, AI, Audit |
+| **Event Store** | PostgreSQL | Event Horizon event storage |
+| **Read Models** | PostgreSQL | CQRS projections for both systems |
+| **Identity** | Ory Kratos | All domains (authentication) |
+| **Authorization** | Ory Keto | All domains (permissions) |
+| **Gateway** | Ory Oathkeeper | All domains (routing) |
+| **Workflows** | Temporal | Tenant provisioning, multi-step sagas |
+| **Database** | PostgreSQL 16 | Schema-per-tenant, event store, projections |
+
+---
+
+## Decision Matrix: Which Tool When?
+
+### **Use Formance if:**
+- ✅ Involves money movement (deposits, withdrawals, transfers)
+- ✅ Needs multi-asset support (USD, EUR, BTC, ETH)
+- ✅ Requires double-entry bookkeeping
+- ✅ Needs real-time balance queries
+- ✅ Requires holds/reserves on funds
+- ✅ Subject to financial regulations (PCI-DSS, SOC 2)
+
+### **Use Event Horizon if:**
+- ✅ Workflow/state machine (KYC approval, alert investigation)
+- ✅ Regulatory audit trail (compliance decisions, fraud cases)
+- ✅ Complex business logic (voting, AI decisions)
+- ✅ Document management (KYC documents, evidence)
+- ✅ Tamper-proof history (governance, security logs)
+- ✅ Custom projections needed (analytics, dashboards)
+
+### **Use Both if:**
+- ✅ Financial operation + compliance audit (e.g., large transfer needs approval trail)
+- ✅ Money movement + business workflow (e.g., loan disbursement with approval)
+- ✅ Trade execution + regulatory reporting (e.g., exchange trade + MiFID II report)
+
+---
+
+## Benefits of Hybrid Approach
+
+### **Compared to Formance-Only:**
+- ✅ Flexibility for non-financial workflows
+- ✅ Custom audit trails for compliance
+- ✅ Event replay for debugging/analysis
+- ✅ Not limited to financial primitives
+
+### **Compared to Event Horizon-Only:**
+- ✅ Battle-tested financial ledger
+- ✅ Guaranteed double-entry correctness
+- ✅ Real-time balances (no replay lag)
+- ✅ Multi-asset support built-in
+- ✅ Reduced code maintenance (~5,000 lines less)
+
+### **Best of Both Worlds:**
+- ✅ Financial operations: Production-proven (Formance)
+- ✅ Compliance workflows: Flexible audit trails (Event Horizon)
+- ✅ Reduced complexity: Don't build financial ledger
+- ✅ Full control: Custom event sourcing where needed
+- ✅ Compliance-ready: Both systems provide audit trails
+
+---
+
+## Migration Impact (Revised)
+
+**Task Count:**
+- Previous (Formance-only): 174 tasks
+- **Revised (Hybrid)**: 191 tasks (+17 Event Horizon tasks)
+
+**Estimated Hours:**
+- Previous: 2,180 hours
+- **Revised**: 2,290 hours (+110 hours for Event Horizon)
+
+**Complexity:**
+- Previous: Medium (all API integrations)
+- **Revised**: Medium-High (API + custom event sourcing for compliance)
+
+**Maintainability:**
+- Previous: Low (all external services)
+- **Revised**: Medium (external for finance, internal for compliance)
+
+**Regulatory Compliance:**
+- Previous: Good (Formance audit trails)
+- **Revised**: Excellent (Formance + custom audit for compliance workflows)
+
+**Net Assessment:**
+✅ Hybrid is worth the extra 17 tasks and 110 hours
+✅ Provides regulatory compliance flexibility
+✅ Maintains financial correctness via Formance
+✅ Allows custom workflows where needed
+
+---
+
+**Status:** Hybrid architecture approved
+**Next:** Update migration tasks with Event Horizon phases
+**Document Version:** 2.0 (Hybrid Event Sourcing)

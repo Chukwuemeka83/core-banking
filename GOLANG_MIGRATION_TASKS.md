@@ -2,13 +2,29 @@
 
 > **Complete source of truth for PHP/Laravel to Golang migration**
 >
-> **Architecture:** Cell-Based (Shared-Nothing) + Ory Stack + Formance
+> **Architecture:** Cell-Based (Shared-Nothing) + Ory Stack + **HYBRID (Formance + Event Horizon)**
 >
-> 174 comprehensive, AI-agent-executable atomic tasks covering 15 domains
+> 191 comprehensive, AI-agent-executable atomic tasks covering 15 domains
 
 ---
 
 ## 🏗️ Architectural Overview
+
+### **🔄 HYBRID Event Sourcing Strategy**
+
+**Critical Design Decision:** We use **TWO complementary systems** based on domain requirements:
+
+| Domain Class | Technology | Use Cases |
+|--------------|------------|-----------|
+| **Class A - Financial** | Formance Ledger + Wallets | Account balances, Payment transactions, Exchange trades, Lending repayments, Treasury movements, Stablecoin operations |
+| **Class B - Non-Financial** | Event Horizon (Event Sourcing) | Compliance alerts, KYC verification, AML monitoring, Fraud detection, Governance votes, AI agent decisions, Audit logs |
+
+**Rationale:**
+- **Formance** provides battle-tested immutable ledger for financial correctness
+- **Event Horizon** offers flexible event sourcing for complex workflows requiring replay capability
+- **Best of both worlds:** Financial accuracy + Workflow flexibility
+
+---
 
 ### **The Cell-Based Model**
 
@@ -29,17 +45,18 @@ We are building a **Strict Multi-Tenant (Shared-Nothing)** fintech platform divi
 
 ### **Technology Stack**
 
-| Component | Solution | Scope |
-|-----------|----------|-------|
-| **Identity** | Ory Kratos | Tenant-scoped (per-realm authentication) |
-| **Authorization** | Ory Keto | Global service with tenant namespaces (ReBAC) |
-| **Gateway/Router** | Ory Oathkeeper | Global (routes by domain to tenant silos) |
-| **Asset Engine** | Formance Wallets | Tenant-scoped (multi-asset balance management) |
-| **Immutable Ledger** | Formance Ledger | Tenant-scoped (double-entry transaction log) |
-| **Workflows** | Temporal | Global + Per-Tenant queues (sagas, provisioning) |
-| **Database** | PostgreSQL 16 | Schema-per-tenant (physical isolation) |
-| **Cache** | Redis 7 | Tenant-scoped (namespace per tenant) |
-| **Observability** | OpenTelemetry + Jaeger + Prometheus | Global with tenant context |
+| Component | Solution | Scope | Used For |
+|-----------|----------|-------|----------|
+| **Identity** | Ory Kratos | Tenant-scoped (per-realm authentication) | All authentication |
+| **Authorization** | Ory Keto | Global service with tenant namespaces (ReBAC) | All permissions |
+| **Gateway/Router** | Ory Oathkeeper | Global (routes by domain to tenant silos) | Request routing |
+| **Asset Engine** | Formance Wallets | Tenant-scoped (multi-asset balance management) | **Financial domains** |
+| **Immutable Ledger** | Formance Ledger | Tenant-scoped (double-entry transaction log) | **Financial domains** |
+| **Event Sourcing** | Event Horizon | Tenant-scoped (event store + projections) | **Non-financial domains** |
+| **Workflows** | Temporal | Global + Per-Tenant queues (sagas, provisioning) | All orchestration |
+| **Database** | PostgreSQL 16 | Schema-per-tenant (physical isolation) | All persistence |
+| **Cache** | Redis 7 | Tenant-scoped (namespace per tenant) | All caching |
+| **Observability** | OpenTelemetry + Jaeger + Prometheus | Global with tenant context | All monitoring |
 
 ### **Data Hierarchy**
 
@@ -70,32 +87,37 @@ Logic: If yes, inherit full access to all Account's wallets
 
 ## 📊 Task Breakdown
 
-**Total Tasks:** 174
-**Total Estimated Hours:** 2,180 hours (~55 weeks)
-**Completion Status:** 0% (Architecture redesigned - ready to implement)
+**Total Tasks:** 191
+**Total Estimated Hours:** 2,344 hours (~59 weeks)
+**Completion Status:** 0% (Hybrid architecture redesigned - ready to implement)
 **Last Updated:** 2026-01-01
 
 ### Phase Summary
 
-| Phase | Domain | Tasks | Hours | Weeks |
-|-------|--------|-------|-------|-------|
-| 0 | Infrastructure & Ory/Formance Setup | 10 | 96 | 2.5 |
-| 1 | Control Plane (Tenant Provisioning) | 8 | 84 | 2 |
-| 2 | Ory Stack Integration | 12 | 120 | 3 |
-| 3 | Formance Integration | 10 | 100 | 2.5 |
-| 4 | Schema-per-Tenant Middleware | 6 | 48 | 1.5 |
-| 5 | Account Domain (Cell-Based) | 8 | 80 | 2 |
-| 6 | Payment Domain (Formance-Based) | 10 | 100 | 2.5 |
-| 7 | Compliance & KYC | 18 | 220 | 5.5 |
-| 8 | Exchange (Formance-Based) | 12 | 140 | 3.5 |
-| 9 | Treasury (Formance-Based) | 14 | 180 | 4.5 |
-| 10 | Lending (Formance-Based) | 10 | 120 | 3 |
-| 11 | Stablecoin (Formance-Based) | 9 | 110 | 3 |
-| 12 | Wallet/Blockchain | 12 | 160 | 4 |
-| 13 | AI & Agent Coordination | 9 | 110 | 3 |
-| 14 | CGO & Governance | 13 | 170 | 4.5 |
-| 15 | Monitoring & Supporting | 13 | 142 | 3.5 |
-| **TOTAL** | **All Domains** | **174** | **2,180** | **~55** |
+| Phase | Domain | Technology | Tasks | Hours | Weeks |
+|-------|--------|------------|-------|-------|-------|
+| 0 | Infrastructure & Ory/Formance Setup | Ory + Formance | 10 | 96 | 2.5 |
+| 1 | Control Plane (Tenant Provisioning) | Temporal | 8 | 84 | 2 |
+| 2 | Ory Stack Integration | Ory Kratos/Keto/Oathkeeper | 12 | 120 | 3 |
+| 3 | Formance Integration | Formance Ledger/Wallets | 10 | 100 | 2.5 |
+| 4 | **Event Horizon Setup** | **Event Horizon** | **8** | **64** | **1.5** |
+| 5 | Schema-per-Tenant Middleware | PostgreSQL | 6 | 48 | 1.5 |
+| 6 | Account Domain (Cell-Based) | Formance (balances) + GORM | 8 | 80 | 2 |
+| 7 | Payment Domain (Formance-Based) | Formance | 10 | 100 | 2.5 |
+| 8 | **Compliance & KYC** | **Event Horizon** | **18** | **220** | **5.5** |
+| 9 | Exchange (Formance-Based) | Formance | 12 | 140 | 3.5 |
+| 10 | Treasury (Formance-Based) | Formance | 14 | 180 | 4.5 |
+| 11 | Lending (Formance-Based) | Formance | 10 | 120 | 3 |
+| 12 | Stablecoin (Formance-Based) | Formance | 9 | 110 | 3 |
+| 13 | Wallet/Blockchain | Formance + Ethereum | 12 | 160 | 4 |
+| 14 | **AI & Agent Coordination** | **Event Horizon** | **9** | **110** | **3** |
+| 15 | **CGO & Governance** | **Event Horizon** | **13** | **170** | **4.5** |
+| 16 | Monitoring & Supporting | OpenTelemetry | 13 | 142 | 3.5 |
+| **TOTAL** | **All Domains** | **Hybrid** | **191** | **2,344** | **~59** |
+
+**Legend:**
+- **Bold** = Event Horizon-based domains (non-financial workflows)
+- Regular = Formance-based domains (financial operations)
 
 ---
 
@@ -106,11 +128,13 @@ Logic: If yes, inherit full access to all Account's wallets
 > 1. **Strict Plane Separation:** Control Plane NEVER accesses Tenant Plane data
 > 2. **Schema Isolation:** Middleware MUST set `search_path` per request
 > 3. **No Custom Auth:** Use Ory Kratos UUIDs as FK (NO password storage)
-> 4. **No Custom Wallets:** Use Formance Wallets API (NO balance in Postgres)
-> 5. **Formance as Source of Truth:** PostgreSQL stores mappings ONLY
-> 6. **Ory Keto for Permissions:** Implement two-layer fallback strategy
-> 7. **Tenant Provisioning via Temporal:** Atomic workflow with compensation
-> 8. **All Entities Tenant-Scoped:** No global user/wallet tables
+> 4. **No Custom Wallets (Financial):** Use Formance Wallets API (NO balance in Postgres)
+> 5. **Hybrid Event Strategy:** Financial = Formance, Non-Financial = Event Horizon
+> 6. **Event Sourcing for Workflows:** Compliance, KYC, Governance, AI use Event Horizon
+> 7. **Formance as Financial Source of Truth:** PostgreSQL stores mappings ONLY for financial data
+> 8. **Ory Keto for Permissions:** Implement two-layer fallback strategy
+> 9. **Tenant Provisioning via Temporal:** Atomic workflow with compensation
+> 10. **All Entities Tenant-Scoped:** No global user/wallet/event tables
 
 ---
 
@@ -950,60 +974,735 @@ func TestTenantService_GetByDomain(t *testing.T) {
 
 ---
 
-## Phase 4: Schema-per-Tenant Middleware
+## Phase 4: Event Horizon Setup (Event Sourcing for Non-Financial Domains)
 
-**Duration:** Week 11 (1.5 weeks)
+**Duration:** Weeks 11-12 (1.5 weeks)
+**Goal:** Set up Event Horizon framework for compliance, governance, and workflow domains
+**Dependencies:** Phase 0
+
+---
+
+### Task 4.1: Event Horizon SDK Installation
+
+**Task ID:** P4-EVENTHORIZON-001
+**Description:** Install and configure Event Horizon v0.16+ for event sourcing
+**Priority:** Critical
+**Complexity:** S (1-3h)
+
+**Dependencies:** P0-INFRA-001
+
+**Acceptance Criteria:**
+- [ ] Event Horizon SDK installed (github.com/looplab/eventhorizon)
+- [ ] MongoDB driver for event store configured
+- [ ] Redis for event bus configured
+- [ ] Basic event store configuration working
+
+**Implementation:**
+```bash
+go get github.com/looplab/eventhorizon/v2
+go get github.com/looplab/eventhorizon/v2/eventstore/mongodb
+go get github.com/looplab/eventhorizon/v2/eventbus/redis
+```
+
+**Configuration:**
+```go
+// pkg/eventhorizon/config.go
+package eventhorizon
+
+import (
+    "context"
+    "github.com/looplab/eventhorizon/v2"
+    mongostore "github.com/looplab/eventhorizon/v2/eventstore/mongodb"
+    redisbus "github.com/looplab/eventhorizon/v2/eventbus/redis"
+)
+
+func NewEventStore(ctx context.Context, tenantID string) (eventhorizon.EventStore, error) {
+    // Tenant-scoped MongoDB collection
+    collectionName := fmt.Sprintf("events_%s", tenantID)
+
+    store, err := mongostore.NewEventStore(
+        mongoURI,
+        dbName,
+        mongostore.WithCollectionName(collectionName),
+    )
+    return store, err
+}
+
+func NewEventBus(tenantID string) (eventhorizon.EventBus, error) {
+    // Tenant-scoped Redis stream
+    streamKey := fmt.Sprintf("events:%s", tenantID)
+
+    return redisbus.NewEventBus(
+        redisAddr,
+        redisbus.WithStreamKey(streamKey),
+    )
+}
+```
+
+**Testing:**
+```go
+func TestEventStoreCreation(t *testing.T) {
+    ctx := context.Background()
+    store, err := NewEventStore(ctx, "test-tenant")
+    require.NoError(t, err)
+    assert.NotNil(t, store)
+}
+```
+
+---
+
+### Task 4.2: Tenant-Scoped Event Store Tables
+
+**Task ID:** P4-EVENTHORIZON-002
+**Description:** Configure PostgreSQL event store tables per tenant schema
+**Priority:** Critical
+**Complexity:** M (4-8h)
+
+**Dependencies:** P4-EVENTHORIZON-001, P0-INFRA-004
+
+**Acceptance Criteria:**
+- [ ] Event store tables in each tenant schema
+- [ ] Snapshot tables in each tenant schema
+- [ ] Proper indexing for aggregate retrieval
+- [ ] Migration templates created
+
+**Schema Template:**
+```sql
+-- Add to tenant schema template
+-- Event store for non-financial domains (Compliance, Governance, etc.)
+
+CREATE TABLE events (
+    id BIGSERIAL PRIMARY KEY,
+    aggregate_id UUID NOT NULL,
+    aggregate_type VARCHAR(255) NOT NULL,
+    version INT NOT NULL,
+    event_type VARCHAR(255) NOT NULL,
+    data JSONB NOT NULL,
+    metadata JSONB,
+    timestamp TIMESTAMP DEFAULT NOW(),
+    UNIQUE(aggregate_id, version)
+);
+
+CREATE INDEX idx_events_aggregate ON events(aggregate_id);
+CREATE INDEX idx_events_type ON events(aggregate_type);
+CREATE INDEX idx_events_timestamp ON events(timestamp);
+
+CREATE TABLE snapshots (
+    id BIGSERIAL PRIMARY KEY,
+    aggregate_id UUID NOT NULL,
+    aggregate_type VARCHAR(255) NOT NULL,
+    version INT NOT NULL,
+    data JSONB NOT NULL,
+    timestamp TIMESTAMP DEFAULT NOW(),
+    UNIQUE(aggregate_id, version)
+);
+
+CREATE INDEX idx_snapshots_aggregate ON snapshots(aggregate_id);
+```
+
+**Testing:**
+```bash
+# Apply to test tenant schema
+psql -c "SET search_path TO tenant_test123; \i event-store-schema.sql"
+```
+
+---
+
+### Task 4.3: Aggregate Root Base Implementation
+
+**Task ID:** P4-EVENTHORIZON-003
+**Description:** Create base aggregate root with event sourcing patterns
+**Priority:** Critical
+**Complexity:** M (4-8h)
+
+**Dependencies:** P4-EVENTHORIZON-002
+
+**Acceptance Criteria:**
+- [ ] Base aggregate interface defined
+- [ ] Event application logic implemented
+- [ ] Version tracking working
+- [ ] Snapshot support added
+
+**Implementation:**
+```go
+// pkg/eventhorizon/aggregate.go
+package eventhorizon
+
+import (
+    "context"
+    "github.com/google/uuid"
+    eh "github.com/looplab/eventhorizon/v2"
+)
+
+// BaseAggregate provides common aggregate functionality
+type BaseAggregate struct {
+    ID      uuid.UUID
+    Version int
+    Events  []eh.Event
+}
+
+func (a *BaseAggregate) EntityID() uuid.UUID {
+    return a.ID
+}
+
+func (a *BaseAggregate) AggregateVersion() int {
+    return a.Version
+}
+
+func (a *BaseAggregate) ApplyEvent(ctx context.Context, event eh.Event) error {
+    a.Events = append(a.Events, event)
+    a.Version++
+    return nil
+}
+
+// Example: Compliance Alert Aggregate
+type ComplianceAlertAggregate struct {
+    BaseAggregate
+
+    AlertType   string
+    Severity    string
+    Status      string
+    Description string
+    AssignedTo  string
+    ResolvedBy  string
+}
+
+const ComplianceAlertAggregateType eh.AggregateType = "compliance_alert"
+
+func (a *ComplianceAlertAggregate) HandleCommand(ctx context.Context, cmd eh.Command) error {
+    switch cmd := cmd.(type) {
+    case *CreateAlertCommand:
+        return a.handleCreateAlert(ctx, cmd)
+    case *AssignAlertCommand:
+        return a.handleAssignAlert(ctx, cmd)
+    case *ResolveAlertCommand:
+        return a.handleResolveAlert(ctx, cmd)
+    default:
+        return fmt.Errorf("unsupported command: %T", cmd)
+    }
+}
+
+func (a *ComplianceAlertAggregate) handleCreateAlert(ctx context.Context, cmd *CreateAlertCommand) error {
+    // Business validation
+    if cmd.Severity == "" {
+        return fmt.Errorf("severity required")
+    }
+
+    // Record domain event
+    event := &AlertCreatedEvent{
+        AlertID:     a.ID,
+        AlertType:   cmd.AlertType,
+        Severity:    cmd.Severity,
+        Description: cmd.Description,
+    }
+
+    return a.ApplyEvent(ctx, event)
+}
+
+// Event handler
+func (a *ComplianceAlertAggregate) ApplyEvent(ctx context.Context, event eh.Event) error {
+    switch e := event.Data().(type) {
+    case *AlertCreatedEvent:
+        a.AlertType = e.AlertType
+        a.Severity = e.Severity
+        a.Status = "open"
+        a.Description = e.Description
+    case *AlertAssignedEvent:
+        a.AssignedTo = e.AssignedTo
+        a.Status = "investigating"
+    case *AlertResolvedEvent:
+        a.ResolvedBy = e.ResolvedBy
+        a.Status = "resolved"
+    }
+
+    return a.BaseAggregate.ApplyEvent(ctx, event)
+}
+```
+
+**Testing:**
+```go
+func TestComplianceAlertAggregate(t *testing.T) {
+    aggregate := &ComplianceAlertAggregate{
+        BaseAggregate: BaseAggregate{ID: uuid.New()},
+    }
+
+    cmd := &CreateAlertCommand{
+        AlertType:   "suspicious_activity",
+        Severity:    "high",
+        Description: "Large cash transaction",
+    }
+
+    err := aggregate.HandleCommand(context.Background(), cmd)
+    require.NoError(t, err)
+    assert.Equal(t, "suspicious_activity", aggregate.AlertType)
+    assert.Equal(t, "open", aggregate.Status)
+}
+```
+
+---
+
+### Task 4.4: Event Bus Configuration
+
+**Task ID:** P4-EVENTHORIZON-004
+**Description:** Set up event bus for domain event publishing
+**Priority:** High
+**Complexity:** M (4-8h)
+
+**Dependencies:** P4-EVENTHORIZON-003
+
+**Acceptance Criteria:**
+- [ ] Redis-based event bus configured
+- [ ] Tenant-scoped event streams
+- [ ] Event handlers registration working
+- [ ] Retry and error handling implemented
+
+**Implementation:**
+```go
+// pkg/eventhorizon/eventbus.go
+package eventhorizon
+
+import (
+    "context"
+    eh "github.com/looplab/eventhorizon/v2"
+    redisbus "github.com/looplab/eventhorizon/v2/eventbus/redis"
+)
+
+type TenantEventBus struct {
+    buses map[string]eh.EventBus
+    redis string
+}
+
+func NewTenantEventBus(redisAddr string) *TenantEventBus {
+    return &TenantEventBus{
+        buses: make(map[string]eh.EventBus),
+        redis: redisAddr,
+    }
+}
+
+func (b *TenantEventBus) GetBusForTenant(tenantID string) (eh.EventBus, error) {
+    if bus, exists := b.buses[tenantID]; exists {
+        return bus, nil
+    }
+
+    streamKey := fmt.Sprintf("events:%s", tenantID)
+    bus, err := redisbus.NewEventBus(
+        b.redis,
+        redisbus.WithStreamKey(streamKey),
+    )
+    if err != nil {
+        return nil, err
+    }
+
+    b.buses[tenantID] = bus
+    return bus, nil
+}
+```
+
+**Testing:**
+```go
+func TestEventBusPublish(t *testing.T) {
+    bus := NewTenantEventBus("localhost:6379")
+    tenantBus, _ := bus.GetBusForTenant("test-tenant")
+
+    event := eh.NewEvent(
+        "AlertCreated",
+        &AlertCreatedEvent{AlertID: uuid.New()},
+        time.Now(),
+    )
+
+    err := tenantBus.PublishEvent(context.Background(), event)
+    require.NoError(t, err)
+}
+```
+
+---
+
+### Task 4.5: Projector Infrastructure
+
+**Task ID:** P4-EVENTHORIZON-005
+**Description:** Build projector system for read model updates
+**Priority:** High
+**Complexity:** M (4-8h)
+
+**Dependencies:** P4-EVENTHORIZON-004
+
+**Acceptance Criteria:**
+- [ ] Base projector interface
+- [ ] Event subscription mechanism
+- [ ] Read model updates working
+- [ ] Idempotent event handling
+
+**Implementation:**
+```go
+// pkg/eventhorizon/projector.go
+package eventhorizon
+
+import (
+    "context"
+    eh "github.com/looplab/eventhorizon/v2"
+    "gorm.io/gorm"
+)
+
+type Projector interface {
+    ProjectorType() string
+    Project(ctx context.Context, event eh.Event) error
+}
+
+type BaseProjector struct {
+    db *gorm.DB
+}
+
+// Example: Compliance Alert Projector
+type ComplianceAlertProjector struct {
+    BaseProjector
+}
+
+func (p *ComplianceAlertProjector) ProjectorType() string {
+    return "ComplianceAlertProjector"
+}
+
+func (p *ComplianceAlertProjector) Project(ctx context.Context, event eh.Event) error {
+    switch e := event.Data().(type) {
+    case *AlertCreatedEvent:
+        return p.onAlertCreated(ctx, e)
+    case *AlertAssignedEvent:
+        return p.onAlertAssigned(ctx, e)
+    case *AlertResolvedEvent:
+        return p.onAlertResolved(ctx, e)
+    }
+    return nil
+}
+
+func (p *ComplianceAlertProjector) onAlertCreated(ctx context.Context, event *AlertCreatedEvent) error {
+    // Create read model
+    alert := &ComplianceAlertReadModel{
+        ID:          event.AlertID,
+        AlertType:   event.AlertType,
+        Severity:    event.Severity,
+        Status:      "open",
+        Description: event.Description,
+        CreatedAt:   time.Now(),
+    }
+
+    return p.db.WithContext(ctx).Create(alert).Error
+}
+
+func (p *ComplianceAlertProjector) onAlertAssigned(ctx context.Context, event *AlertAssignedEvent) error {
+    return p.db.WithContext(ctx).
+        Model(&ComplianceAlertReadModel{}).
+        Where("id = ?", event.AlertID).
+        Updates(map[string]interface{}{
+            "assigned_to": event.AssignedTo,
+            "status":      "investigating",
+            "updated_at":  time.Now(),
+        }).Error
+}
+
+// Read model (GORM)
+type ComplianceAlertReadModel struct {
+    ID          uuid.UUID `gorm:"type:uuid;primary_key"`
+    AlertType   string
+    Severity    string
+    Status      string
+    Description string
+    AssignedTo  string
+    ResolvedBy  string
+    CreatedAt   time.Time
+    UpdatedAt   time.Time
+}
+```
+
+**Testing:**
+```go
+func TestProjectorUpdatesReadModel(t *testing.T) {
+    db := setupTestDB(t)
+    projector := &ComplianceAlertProjector{BaseProjector{db: db}}
+
+    event := &AlertCreatedEvent{
+        AlertID:   uuid.New(),
+        AlertType: "test",
+        Severity:  "high",
+    }
+
+    err := projector.onAlertCreated(context.Background(), event)
+    require.NoError(t, err)
+
+    var alert ComplianceAlertReadModel
+    err = db.First(&alert, "id = ?", event.AlertID).Error
+    require.NoError(t, err)
+    assert.Equal(t, "open", alert.Status)
+}
+```
+
+---
+
+### Task 4.6: Command/Event Handler Base Classes
+
+**Task ID:** P4-EVENTHORIZON-006
+**Description:** Create reusable command and event handler patterns
+**Priority:** Medium
+**Complexity:** M (4-8h)
+
+**Dependencies:** P4-EVENTHORIZON-005
+
+**Acceptance Criteria:**
+- [ ] Command handler interface
+- [ ] Event handler interface
+- [ ] Handler registration system
+- [ ] Middleware support (logging, validation)
+
+**Implementation:**
+```go
+// pkg/eventhorizon/handlers.go
+package eventhorizon
+
+import (
+    "context"
+    eh "github.com/looplab/eventhorizon/v2"
+)
+
+type CommandHandler interface {
+    HandleCommand(ctx context.Context, cmd eh.Command) error
+}
+
+type EventHandler interface {
+    HandleEvent(ctx context.Context, event eh.Event) error
+}
+
+// Command handler with middleware
+type MiddlewareCommandHandler struct {
+    handler    CommandHandler
+    middleware []CommandMiddleware
+}
+
+type CommandMiddleware func(CommandHandler) CommandHandler
+
+func (h *MiddlewareCommandHandler) HandleCommand(ctx context.Context, cmd eh.Command) error {
+    handler := h.handler
+    for i := len(h.middleware) - 1; i >= 0; i-- {
+        handler = h.middleware[i](handler)
+    }
+    return handler.HandleCommand(ctx, cmd)
+}
+
+// Logging middleware
+func LoggingMiddleware(logger *zap.Logger) CommandMiddleware {
+    return func(next CommandHandler) CommandHandler {
+        return CommandHandlerFunc(func(ctx context.Context, cmd eh.Command) error {
+            logger.Info("handling command",
+                zap.String("command", fmt.Sprintf("%T", cmd)),
+            )
+            return next.HandleCommand(ctx, cmd)
+        })
+    }
+}
+```
+
+---
+
+### Task 4.7: Integration Testing Setup
+
+**Task ID:** P4-EVENTHORIZON-007
+**Description:** Create integration tests for Event Horizon infrastructure
+**Priority:** High
+**Complexity:** M (4-8h)
+
+**Dependencies:** P4-EVENTHORIZON-006
+
+**Acceptance Criteria:**
+- [ ] End-to-end event sourcing test
+- [ ] Aggregate reconstitution from events
+- [ ] Projection rebuild test
+- [ ] Tenant isolation verified
+
+**Testing:**
+```go
+// pkg/eventhorizon/integration_test.go
+func TestEventSourcingEndToEnd(t *testing.T) {
+    // Setup
+    ctx := context.Background()
+    tenantID := "test-tenant"
+
+    store, _ := NewEventStore(ctx, tenantID)
+    bus, _ := NewEventBus(tenantID)
+
+    // Create aggregate
+    alertID := uuid.New()
+    aggregate := &ComplianceAlertAggregate{
+        BaseAggregate: BaseAggregate{ID: alertID},
+    }
+
+    // Execute commands
+    aggregate.HandleCommand(ctx, &CreateAlertCommand{
+        AlertType: "test",
+        Severity:  "high",
+    })
+    aggregate.HandleCommand(ctx, &AssignAlertCommand{
+        AssignedTo: "officer-123",
+    })
+
+    // Save events
+    err := store.Save(ctx, aggregate.Events, aggregate.Version)
+    require.NoError(t, err)
+
+    // Reconstitute from events
+    events, _ := store.Load(ctx, alertID)
+
+    newAggregate := &ComplianceAlertAggregate{
+        BaseAggregate: BaseAggregate{ID: alertID},
+    }
+
+    for _, event := range events {
+        newAggregate.ApplyEvent(ctx, event)
+    }
+
+    assert.Equal(t, "investigating", newAggregate.Status)
+    assert.Equal(t, "officer-123", newAggregate.AssignedTo)
+}
+```
+
+---
+
+### Task 4.8: Documentation & Examples
+
+**Task ID:** P4-EVENTHORIZON-008
+**Description:** Document Event Horizon usage patterns and examples
+**Priority:** Medium
+**Complexity:** S (1-3h)
+
+**Dependencies:** P4-EVENTHORIZON-007
+
+**Acceptance Criteria:**
+- [ ] README with Event Horizon setup
+- [ ] Code examples for common patterns
+- [ ] Decision guide (Formance vs Event Horizon)
+- [ ] Migration guide from Laravel Event Sourcing
+
+**Documentation:**
+```markdown
+# Event Horizon Setup
+
+## When to Use Event Horizon
+
+Use Event Horizon for:
+- Compliance workflows (alerts, investigations)
+- KYC/AML processes (document verification, risk assessment)
+- Governance (voting, proposals)
+- AI agent decision tracking
+- Audit logs requiring replay capability
+
+Use Formance for:
+- Account balances
+- Payment transactions
+- Exchange trades
+- Lending repayments
+- Treasury movements
+- Stablecoin operations
+
+## Example: Creating an Aggregate
+
+\`\`\`go
+aggregate := ComplianceAlertAggregate.Create(
+    alertType: "suspicious_activity",
+    severity: "high",
+)
+aggregate.Assign("officer-123")
+aggregate.Resolve("false_positive", "officer-123")
+aggregate.Persist()
+\`\`\`
+
+## Event Store Schema
+
+Each tenant gets isolated event tables:
+- `events` - Event stream
+- `snapshots` - Aggregate snapshots
+```
+
+---
+
+## Phase 5: Schema-per-Tenant Middleware
+
+**Duration:** Weeks 13-14 (1.5 weeks)
 **Goal:** Implement automatic schema isolation
 **Dependencies:** Phase 0
 
 ### Tasks Overview (6 tasks, 48 hours)
 
-- **4.1:** Tenant Context Extraction Middleware (X-Tenant-ID, domain)
-- **4.2:** PostgreSQL Search Path Middleware (SET search_path)
-- **4.3:** Tenant-Scoped Database Connection Pool
-- **4.4:** Request-Level Tenant Context Propagation
-- **4.5:** Cross-Tenant Query Prevention (circuit breaker)
-- **4.6:** Integration Testing (schema isolation verification)
+- **5.1:** Tenant Context Extraction Middleware (X-Tenant-ID, domain)
+- **5.2:** PostgreSQL Search Path Middleware (SET search_path)
+- **5.3:** Tenant-Scoped Database Connection Pool
+- **5.4:** Request-Level Tenant Context Propagation
+- **5.5:** Cross-Tenant Query Prevention (circuit breaker)
+- **5.6:** Integration Testing (schema isolation verification)
 
 [Detailed tasks to be added]
 
 ---
 
-## Phase 5: Account Domain (Cell-Based)
+## Phase 6: Account Domain (Cell-Based)
 
-**Duration:** Weeks 12-13 (2 weeks)
-**Goal:** Implement Account as logical container
-**Dependencies:** Phase 2, Phase 3, Phase 4
+**Duration:** Weeks 15-16 (2 weeks)
+**Goal:** Implement Account as logical container with Formance wallet integration
+**Dependencies:** Phase 2, Phase 3, Phase 5
 
 ### Tasks Overview (8 tasks, 80 hours)
 
-- **5.1:** Account Model & Repository (B2C vs B2B support)
-- **5.2:** Account Creation Service (with Kratos user linking)
-- **5.3:** Account Member Management (OWNER, ADMIN, MEMBER, VIEWER)
-- **5.4:** Account-Wallet Relationship (one-to-many)
-- **5.5:** Account Query Service (list, get, search)
-- **5.6:** Account Status Management (active, suspended, closed)
-- **5.7:** Account REST API (CRUD + membership)
-- **5.8:** Integration Tests (Account + Ory Keto permissions)
+- **6.1:** Account Model & Repository (B2C vs B2B support)
+- **6.2:** Account Creation Service (with Kratos user linking)
+- **6.3:** Account Member Management (OWNER, ADMIN, MEMBER, VIEWER)
+- **6.4:** Account-Wallet Relationship (one-to-many via Formance)
+- **6.5:** Account Query Service (list, get, search)
+- **6.6:** Account Status Management (active, suspended, closed)
+- **6.7:** Account REST API (CRUD + membership)
+- **6.8:** Integration Tests (Account + Ory Keto permissions + Formance wallets)
 
 [Detailed tasks to be added]
 
 ---
 
-## Phase 6-15: Remaining Domains
+## Phase 7-16: Remaining Domains
 
 [Due to scope, detailed task breakdowns will be provided in subsequent revisions]
 
-### Phase 6: Payment Domain (Formance-Based) - 10 tasks
-### Phase 7: Compliance & KYC - 18 tasks
-### Phase 8: Exchange (Formance-Based) - 12 tasks
-### Phase 9: Treasury (Formance-Based) - 14 tasks
-### Phase 10: Lending (Formance-Based) - 10 tasks
-### Phase 11: Stablecoin (Formance-Based) - 9 tasks
-### Phase 12: Wallet/Blockchain - 12 tasks
-### Phase 13: AI & Agent Coordination - 9 tasks
-### Phase 14: CGO & Governance - 13 tasks
-### Phase 15: Monitoring & Supporting - 13 tasks
+### Phase 7: Payment Domain (Formance-Based) - 10 tasks, 100 hours
+**Technology:** Formance Ledger + Wallets
+**Focus:** Deposits, withdrawals, transfers using Formance APIs
+
+### Phase 8: Compliance & KYC (Event Horizon-Based) - 18 tasks, 220 hours
+**Technology:** Event Horizon Event Sourcing
+**Focus:** Alert aggregates, KYC verification workflows, AML monitoring with full audit trail
+
+### Phase 9: Exchange (Formance-Based) - 12 tasks, 140 hours
+**Technology:** Formance Ledger
+**Focus:** Order matching, trade execution, liquidity pools using double-entry ledger
+
+### Phase 10: Treasury (Formance-Based) - 14 tasks, 180 hours
+**Technology:** Formance Wallets + Ledger
+**Focus:** Portfolio management, cash allocation, yield optimization with multi-asset support
+
+### Phase 11: Lending (Formance-Based) - 10 tasks, 120 hours
+**Technology:** Formance Ledger
+**Focus:** Loan disbursements, repayments, interest calculation via ledger
+
+### Phase 12: Stablecoin (Formance-Based) - 9 tasks, 110 hours
+**Technology:** Formance Ledger
+**Focus:** Token minting, burning, transfers with reserve management
+
+### Phase 13: Wallet/Blockchain - 12 tasks, 160 hours
+**Technology:** Formance Wallets + Ethereum
+**Focus:** Blockchain integration, wallet management, crypto operations
+
+### Phase 14: AI & Agent Coordination (Event Horizon-Based) - 9 tasks, 110 hours
+**Technology:** Event Horizon Event Sourcing
+**Focus:** AI decision tracking, agent orchestration, conversation audit trails
+
+### Phase 15: CGO & Governance (Event Horizon-Based) - 13 tasks, 170 hours
+**Technology:** Event Horizon Event Sourcing
+**Focus:** Voting workflows, proposal management, investment rounds with event replay
+
+### Phase 16: Monitoring & Supporting - 13 tasks, 142 hours
+**Technology:** OpenTelemetry + Prometheus + Jaeger
+**Focus:** Observability, metrics, tracing, alerting
 
 ---
 
@@ -1110,6 +1809,199 @@ func (s *PermissionService) CanDebitWallet(ctx context.Context, userID, walletID
 }
 ```
 
+### Pattern 4: Event Horizon Compliance Workflow
+
+```go
+// Compliance Alert Aggregate (Event Sourcing)
+func (s *ComplianceService) CreateAlert(ctx context.Context, cmd CreateAlertCommand) error {
+    // Create aggregate
+    aggregate := &ComplianceAlertAggregate{
+        BaseAggregate: BaseAggregate{
+            ID: uuid.New(),
+        },
+    }
+
+    // Handle command (records events)
+    if err := aggregate.HandleCommand(ctx, &cmd); err != nil {
+        return err
+    }
+
+    // Persist events to event store
+    events := aggregate.UncommittedEvents()
+    if err := s.eventStore.Save(ctx, aggregate.ID, events); err != nil {
+        return err
+    }
+
+    // Publish events to event bus
+    for _, event := range events {
+        if err := s.eventBus.Publish(ctx, event); err != nil {
+            return err
+        }
+    }
+
+    return nil
+}
+
+// Projector listens to events and updates read model
+func (p *ComplianceAlertProjector) HandleEvent(ctx context.Context, event eh.Event) error {
+    switch e := event.Data().(type) {
+    case *AlertCreatedEvent:
+        // Create read model for queries
+        alert := &ComplianceAlertReadModel{
+            ID:          e.AlertID,
+            AlertType:   e.AlertType,
+            Severity:    e.Severity,
+            Status:      "open",
+            Description: e.Description,
+            CreatedAt:   event.Timestamp(),
+        }
+        return p.db.Create(alert).Error
+
+    case *AlertAssignedEvent:
+        // Update read model
+        return p.db.Model(&ComplianceAlertReadModel{}).
+            Where("id = ?", e.AlertID).
+            Updates(map[string]interface{}{
+                "assigned_to": e.AssignedTo,
+                "status":      "investigating",
+            }).Error
+    }
+
+    return nil
+}
+
+// Query read model (CQRS)
+func (q *ComplianceQueryService) GetOpenAlerts(ctx context.Context) ([]*ComplianceAlertReadModel, error) {
+    var alerts []*ComplianceAlertReadModel
+    err := q.db.WithContext(ctx).
+        Where("status = ?", "open").
+        Order("severity DESC, created_at DESC").
+        Find(&alerts).Error
+    return alerts, err
+}
+
+// Replay events to rebuild projections
+func (s *ComplianceService) RebuildProjections(ctx context.Context) error {
+    // Get all events
+    events, err := s.eventStore.LoadAll(ctx, ComplianceAlertAggregateType)
+    if err != nil {
+        return err
+    }
+
+    // Clear existing read models
+    s.db.Exec("TRUNCATE compliance_alert_read_models")
+
+    // Replay all events through projector
+    for _, event := range events {
+        if err := s.projector.HandleEvent(ctx, event); err != nil {
+            return err
+        }
+    }
+
+    return nil
+}
+```
+
+### Pattern 5: Hybrid Pattern (Formance + Event Horizon)
+
+```go
+// Transfer money (Formance) + Create compliance audit trail (Event Horizon)
+func (s *PaymentService) ExecuteTransfer(ctx context.Context, cmd TransferCommand) error {
+    // 1. Validate with Event Horizon compliance aggregate
+    complianceCheck := ComplianceCheckAggregate.Create(
+        transactionType: "transfer",
+        amount:          cmd.Amount,
+        fromWalletID:    cmd.FromWalletID,
+        toWalletID:      cmd.ToWalletID,
+    )
+
+    if err := complianceCheck.ValidateRiskThresholds(ctx); err != nil {
+        return fmt.Errorf("compliance check failed: %w", err)
+    }
+
+    // 2. Execute financial transfer via Formance
+    transfer, err := s.formanceClient.Transfers.Create(ctx, &formance.TransferRequest{
+        SourceWalletID: cmd.FromWalletID,
+        DestWalletID:   cmd.ToWalletID,
+        Amount: &formance.Monetary{
+            Asset:  cmd.Currency,
+            Amount: cmd.Amount.IntPart(),
+        },
+        Metadata: map[string]string{
+            "transfer_id":        cmd.TransferID.String(),
+            "compliance_check":   complianceCheck.ID.String(),
+            "initiated_by":       cmd.UserID.String(),
+        },
+    })
+    if err != nil {
+        // Record failure in Event Horizon
+        complianceCheck.RecordTransferFailure(err.Error())
+        complianceCheck.Persist(ctx)
+        return err
+    }
+
+    // 3. Create audit log via Event Horizon (for compliance replay)
+    auditLog := NewAuditLogAggregate(uuid.New())
+    auditLog.RecordTransfer(TransferRecordedEvent{
+        TransferID:         cmd.TransferID,
+        FormanceTransferID: transfer.ID,
+        FromWalletID:       cmd.FromWalletID,
+        ToWalletID:         cmd.ToWalletID,
+        Amount:             cmd.Amount,
+        Currency:           cmd.Currency,
+        InitiatedBy:        cmd.UserID,
+        ApprovedBy:         cmd.ApproverID,
+        ComplianceCheckID:  complianceCheck.ID,
+        ComplianceNote:     "Transfer approved - risk score: low",
+        Timestamp:          time.Now(),
+    })
+
+    if err := s.auditEventStore.Save(ctx, auditLog); err != nil {
+        // Transfer succeeded in Formance but audit failed - log for reconciliation
+        s.logger.Error("audit log creation failed",
+            zap.String("transfer_id", transfer.ID),
+            zap.Error(err),
+        )
+    }
+
+    // 4. Record successful compliance check
+    complianceCheck.RecordTransferSuccess(transfer.ID)
+    complianceCheck.Persist(ctx)
+
+    return nil
+}
+
+// Query: Combine Formance balance with Event Horizon compliance status
+func (q *AccountQueryService) GetAccountSummary(ctx context.Context, accountID uuid.UUID) (*AccountSummary, error) {
+    // Get account from PostgreSQL
+    account, err := q.accountRepo.GetByID(ctx, accountID)
+    if err != nil {
+        return nil, err
+    }
+
+    // Get wallet balances from Formance
+    wallets, err := q.getWalletBalances(ctx, account.Wallets)
+    if err != nil {
+        return nil, err
+    }
+
+    // Get compliance status from Event Horizon read model
+    complianceStatus, err := q.complianceRepo.GetAccountStatus(ctx, accountID)
+    if err != nil {
+        return nil, err
+    }
+
+    return &AccountSummary{
+        Account:          account,
+        Wallets:          wallets,              // From Formance
+        TotalBalance:     calculateTotal(wallets),
+        ComplianceStatus: complianceStatus,     // From Event Horizon
+        RiskScore:        complianceStatus.RiskScore,
+        KYCStatus:        complianceStatus.KYCStatus,
+    }, nil
+}
+```
+
 ---
 
 ## Appendix B: Migration Checklist
@@ -1117,10 +2009,12 @@ func (s *PermissionService) CanDebitWallet(ctx context.Context, userID, walletID
 ### Before Starting
 
 - [ ] Review architectural analysis (ARCHITECTURE_MIGRATION_ANALYSIS.md)
+- [ ] Understand hybrid approach (Formance vs Event Horizon decision matrix)
 - [ ] Set up Ory stack locally (Docker Compose)
 - [ ] Set up Formance stack locally
+- [ ] Set up Event Horizon with PostgreSQL event store
 - [ ] Configure PostgreSQL multi-schema
-- [ ] Review .cursorrules for Cell-Based patterns
+- [ ] Review .cursorrules for Cell-Based + Hybrid patterns
 
 ### Per-Phase Checklist
 
@@ -1135,22 +2029,45 @@ func (s *PermissionService) CanDebitWallet(ctx context.Context, userID, walletID
 - [ ] Write tests FIRST (TDD)
 - [ ] Implement minimal code
 - [ ] Verify schema isolation (if tenant-scoped)
-- [ ] Verify Formance integration (if wallet-related)
+- [ ] Verify Formance integration (if financial domain)
+- [ ] Verify Event Horizon integration (if non-financial domain)
 - [ ] Verify Ory integration (if auth/authz-related)
 - [ ] Run all tests
 - [ ] Check coverage (>80%)
 - [ ] Commit with conventional message
 
+### Decision Matrix: Formance vs Event Horizon
+
+**Use Formance if:**
+- Financial transaction (balance changes)
+- Money movement (deposits, withdrawals, transfers)
+- Multi-asset balances required
+- Regulatory financial audit trail needed
+- Double-entry accounting required
+
+**Use Event Horizon if:**
+- Workflow with complex state machine
+- Compliance investigation requiring replay
+- Governance/voting process
+- AI decision tracking
+- Audit trail for non-financial operations
+- Event replay capability required
+
+**Use Both (Hybrid) if:**
+- Financial operation with compliance workflow
+- Payment with KYC verification
+- Transfer with fraud detection
+
 ---
 
-## Status: Phase 1 - Foundation Complete
+## Status: Hybrid Architecture Defined
 
 **Next Steps:**
-1. Complete detailed task breakdowns for Phases 2-15
-2. Update .cursorrules with Ory/Formance patterns
+1. Complete detailed task breakdowns for Phases 2-16
+2. Update .cursorrules with hybrid patterns (Ory/Formance/Event Horizon)
 3. Create Temporal workflow examples
-4. Add integration test examples
+4. Add integration test examples for hybrid scenarios
 
-**Document Version:** 1.0 (Cell-Based Architecture)
-**Last Updated:** 2026-01-01
-**Status:** IN PROGRESS - Core phases detailed, remaining phases outlined
+**Document Version:** 2.0 (Hybrid: Cell-Based + Formance + Event Horizon)
+**Last Updated:** 2026-01-02
+**Status:** IN PROGRESS - Hybrid architecture defined, Phase 4 (Event Horizon) detailed
