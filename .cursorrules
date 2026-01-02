@@ -1,46 +1,133 @@
-# FinAegis Golang Fintech Platform - Cursor AI Rules (Hybrid Architecture)
+# FinAegis Golang Fintech Platform - Cursor AI Rules (Cell-Based + Hexagonal Architecture)
 
 > **Complete development guidelines for building Cell-Based, multi-tenant fintech platform in Go**
 >
 > Project: PHP/Laravel → Golang Migration
-> Architecture: Cell-Based (Shared-Nothing) + Ory Stack + **HYBRID (Formance + Event Horizon)** + Temporal
-> Total Tasks: 191 atomic tasks across 16 phases
+> Architecture: Cell-Based (Shared-Nothing) + Hexagonal Architecture + Ory Stack + Formance Stack + Temporal
+> Total Tasks: 183 atomic tasks across 15 phases (Updated 2026-01-02)
 
 ---
 
-## 🚨 CRITICAL: Hybrid Event Sourcing Architecture (2026-01-02)
+## 🚨 CRITICAL: Cell-Based + Hexagonal Architecture (2026-01-02)
 
-**PREVIOUS:** Formance-only approach
-**CURRENT:** Hybrid (Formance + Event Horizon) based on domain requirements
+### **1. Architectural Strategy: The "Cell-Based" Model**
 
-### **🔄 Hybrid Strategy**
+We are building a **Strict Multi-Tenant (Shared-Nothing)** fintech platform divided into two distinct planes:
 
-**Use TWO complementary systems:**
+**Control Plane (Infrastructure Layer):**
+- **Role:** Manages the "Cells" (Tenants), billing, and routing
+- **Has NO access to customer financial data**
+- **Components:** Global Admin API, Global Router (Ory Oathkeeper), Tenant Provisioning Workflows (Temporal)
 
-| Domain Class | Technology | Use Cases |
-|--------------|------------|-----------|
-| **Class A - Financial** | **Formance Ledger + Wallets** | Account balances, Payment transactions, Exchange trades, Lending repayments, Treasury movements, Stablecoin operations |
-| **Class B - Non-Financial** | **Event Horizon (Event Sourcing)** | Compliance alerts, KYC verification, AML monitoring, Fraud detection, Governance votes, AI agent decisions, Audit logs |
+**Tenant Plane (The Data Silos):**
+- **Role:** Isolated environment where a specific B2B Customer (Tenant) and their End-Users live
+- **Components per Tenant:**
+  - Dedicated PostgreSQL Schema (`schema_tenant_{id}`)
+  - Dedicated Ory Kratos Identity Realm
+  - Dedicated Formance Ledger Instance (`ledger-tenant-{id}`)
+  - Dedicated Formance Wallets Instance
 
-### **Architecture Overview**
+### **2. Technology Stack (Ports & Adapters)**
 
-**Cell-Based Multi-Tenancy (Shared-Nothing):**
-- Control Plane: Tenant provisioning, routing (NO customer data access)
-- Tenant Plane: Isolated per-tenant silos (dedicated schema, Formance instance, Kratos realm, Event Horizon event store)
+**CRITICAL:** We use **Hexagonal Architecture (Ports & Adapters)** to decouple from vendors.
 
-**Technology Stack:**
-| Component | Solution | Scope |
-|-----------|----------|-------|
-| Identity | Ory Kratos | Tenant-scoped realms |
-| Authorization | Ory Keto | ReBAC (Relationship-Based Access Control) |
-| Gateway | Ory Oathkeeper | Zero-trust, domain routing |
-| **Financial Ledger** | **Formance Ledger** | **Double-entry for financial transactions** |
-| **Financial Wallets** | **Formance Wallets** | **Multi-asset balance management** |
-| **Event Sourcing** | **Event Horizon** | **Non-financial workflows & compliance** |
-| Workflows | Temporal | Sagas, compensation, tenant provisioning |
-| Database | PostgreSQL 16 | Schema-per-tenant isolation |
-| Event Store | PostgreSQL 16 | Tenant-scoped event tables |
-| Event Bus | Redis 7 | Tenant-scoped streams |
+| Component | Port (Interface) | Selected Default | Scope | Role |
+|-----------|------------------|------------------|-------|------|
+| **Identity** | `IdentityProvider` | **Ory Kratos** | Tenant-scoped | Per-tenant authentication realms |
+| **Permissions** | `AuthorizationProvider` | **Ory Keto** | Global with namespaces | Fine-grained ReBAC (Relationship-Based Access Control) |
+| **Gateway** | `APIGateway` | **Ory Oathkeeper** | Global router | Inspects Host Headers to route to correct Tenant Silo |
+| **Asset Engine** | `WalletService` | **Formance Wallets** | Tenant-scoped | Multi-asset balance management (System of Record) |
+| **Ledger Log** | `LedgerService` | **Formance Ledger** | Tenant-scoped | Immutable double-entry transaction log |
+| **Orchestration** | `WorkflowOrchestrator` | **Temporal** | Global + Per-Tenant queues | Distributed transactions (Sagas) and provisioning workflows |
+| **Database** | Standard SQL | **PostgreSQL 16** | Schema-per-Tenant | Physical data isolation using Postgres Schemas |
+
+**Alternative Adapters (Can be swapped):**
+- **Identity:** Auth0, Keycloak, AWS Cognito, Custom
+- **Authorization:** Casbin, OpenPolicyAgent, Custom RBAC
+- **Ledger:** TigerBeetle, Custom PostgreSQL, EventStore
+- **Workflows:** Cadence, Custom State Machine
+- **Testing:** InMemory adapters for all interfaces
+
+**Key Principle:** Business logic NEVER imports vendor packages. Only adapters do.
+
+### **3. Data Hierarchy & Relationships**
+
+```
+Level 1: Tenant (B2B Customer - The Cell)
+  └─ Level 2: Account (Logical Container - Polymorphic)
+      ├─ B2C Account (Personal): Owned by single User
+      │   ├─ Wallet 1 (Multi-Asset: USD, EUR, BTC, etc.)
+      │   ├─ Wallet 2 (Multi-Asset: Savings, Trading, etc.)
+      │   └─ User (OWNER - sole owner)
+      │
+      └─ B2B Account (Corporate): Owned by Tenant Entity
+          ├─ Wallet 1 (Operational Wallet)
+          ├─ Wallet 2 (Treasury Wallet)
+          ├─ Wallet 3 (Petty Cash Wallet)
+          └─ Users (Operators with varying roles)
+              ├─ User A (ADMIN - full access)
+              ├─ User B (MEMBER - limited access)
+              └─ User C (VIEWER - read-only)
+```
+
+**Level 1: The Tenant (The Silo)**
+- Definition: The B2B Customer (Bank/Fintech) using the platform
+- Implementation: Identified by `X-Tenant-ID` header
+- All downstream data isolated within this Tenant's specific PostgreSQL Schema and Formance Ledger instance
+
+**Level 2: The Account (The Logical Container)**
+- Definition: Primary "Portfolio" or "Relationship" container
+- Polymorphism:
+  - **B2C Account (Personal):** Owned by a single User
+  - **B2B Account (Corporate):** Owned by the Tenant Entity, managed by multiple Users with varying roles
+- **KEY REQUIREMENT:** Users and Wallets are NEVER directly linked. They are linked through the Account.
+
+**Level 3: The Wallet (The Asset Holder)**
+- Solution: Formance Wallets Service (via `WalletService` interface)
+- Capabilities:
+  - **Multi-Asset:** A single Wallet holds multiple currencies (e.g., `{USD: 100, EUR: 50, BTC: 0.5}`)
+  - **Multi-Wallet Accounts:** An Account can hold multiple Wallets for functional separation
+
+**Level 4: The User (The Member)**
+- Solution: Ory Kratos Identity (via `IdentityProvider` interface)
+- Relationship: Users are **Members** of an Account
+  - B2C: User is the sole OWNER member
+  - B2B: Users can be ADMIN, MEMBER, or VIEWER members
+- **NO password storage:** Ory Kratos handles all authentication
+
+### **4. Authorization Model (Two-Layer Fallback)**
+
+**Layer 1: Specific Wallet Permissions (Granular Override)**
+- Check: "Does User Bob have explicit `can_debit` permission on `Wallet_123`?"
+- Use Case: Allowing a junior employee to spend only from the "Petty Cash Wallet"
+- Implementation: Direct relation tuple in Ory Keto
+
+**Layer 2: Account Membership Roles (Inheritance)**
+- Check: "Is User Bob an `ADMIN` of the parent Account?"
+- Logic: If yes, they inherit full access to all Wallets within that Account
+- Implementation: Indirect relation tuple via parent Account
+
+### **5. Critical Workflows (The "Sagas")**
+
+**Workflow A: The "Tenant Factory" (Onboarding)**
+- Tool: Temporal Workflow (via `WorkflowOrchestrator` interface)
+- Steps:
+  1. **DB Provisioning:** Create PostgreSQL Schema and Role restricted to that schema
+  2. **Ledger Provisioning:** Call Formance API to initialize new Ledger instance (`ledger-tenant-{id}`)
+  3. **Wallet Provisioning:** Initialize Formance Wallets service for the tenant
+  4. **Identity Provisioning:** Configure Ory Kratos Realm for the new tenant
+  5. **Authorization Setup:** Create tenant namespace in Ory Keto
+  6. **Routing Registration:** Register tenant's domain in Ory Oathkeeper routing config
+- Saga Pattern: Full compensation on failure (rollback all provisioned resources)
+
+**Workflow B: Money Movement (Transfer)**
+- Tool: Temporal Workflow + Formance Wallets
+- Logic:
+  1. **Authenticate:** Validate `X-Tenant-ID` and User Session via Ory Oathkeeper
+  2. **Authorize:** Check Permissions via Ory Keto (Wallet-level or Account-level fallback)
+  3. **Execute:** Call Formance Wallets API to perform transfer (atomic multi-asset)
+  4. **Record:** Formance automatically writes to underlying Ledger (immutable)
+  5. **Notify:** Emit domain events for downstream systems
 
 ### **Critical Directives**
 
@@ -50,27 +137,41 @@
 3. ✅ **Adapters implement interfaces** in `infrastructure/adapters/`
 4. ❌ **Domain NEVER imports vendor packages** (`github.com/formancehq/*`, `github.com/ory/*`)
 5. ❌ **Domain NEVER imports infrastructure** (`internal/infrastructure/*`)
-6. ✅ **Adapters are pluggable** - switch vendors without changing business logic
+6. ✅ **Adapters pluggable** via configuration (env vars, DI container)
 
-**Hybrid Event Strategy:**
-7. ✅ **Financial operations** → Use `LedgerService` interface (default: Formance adapter)
-8. ✅ **Non-financial workflows** → Use `EventStore` interface (default: Event Horizon adapter)
-9. ✅ **Wallet operations** → Use `WalletService` interface (default: Formance adapter)
+**Multi-Tenancy (Cell-Based):**
+7. ✅ Structure: Separate `control_plane` (Admin/Provisioning) and `tenant_plane` (Runtime Business Logic)
+8. ✅ Isolation: Middleware extracts `X-Tenant-ID` and sets PostgreSQL `SEARCH_PATH` to correct schema
+9. ✅ Control Plane NEVER accesses Tenant Plane data
+10. ✅ All entities tenant-scoped (no global user/wallet/event tables)
 
-**Security & Identity (Abstracted):**
-10. ✅ Use `IdentityProvider` interface (default: Ory Kratos adapter)
-11. ✅ Use `AuthorizationProvider` interface (default: Ory Keto adapter)
-12. ✅ Use `APIGateway` interface (default: Ory Oathkeeper adapter)
+**Identity & Security (Abstracted):**
+11. ✅ Identity: Use `IdentityProvider` interface (default: Ory Kratos adapter)
+12. ✅ Authorization: Use `AuthorizationProvider` interface (default: Ory Keto adapter)
+13. ✅ Gateway: Use `APIGateway` interface (default: Ory Oathkeeper adapter)
+14. ❌ NO custom user table with passwords (Use Ory Kratos UUIDs as FK, profiles only)
 
-**Multi-Tenancy:**
-13. ✅ Schema isolation via middleware (SET search_path per request)
-14. ✅ Control Plane NEVER accesses Tenant Plane data
-15. ✅ All entities tenant-scoped (no global tables)
+**Financial Operations (Abstracted):**
+15. ✅ Wallets: Use `WalletService` interface (default: Formance Wallets adapter)
+16. ✅ Ledger: Use `LedgerService` interface (default: Formance Ledger adapter)
+17. ❌ NO balances in PostgreSQL (PostgreSQL stores mappings ONLY: Local_Wallet_ID <-> Formance_Wallet_ID)
+18. ✅ Formance as financial source of truth (All financial state lives in Formance Ledger)
+
+**Workflows & Orchestration:**
+19. ✅ Workflows: Use `WorkflowOrchestrator` interface (default: Temporal adapter)
+20. ✅ Implement Sagas with compensation for distributed transactions
+21. ✅ Tenant Provisioning: Atomic workflow with full rollback on failure
+
+**Permissions (Two-Layer Fallback):**
+22. ✅ Layer 1: Check wallet-level permissions first (granular override)
+23. ✅ Layer 2: Fallback to account membership roles (inheritance)
+24. ✅ Use Ory Keto relation tuples: `owner`, `admin`, `member`, `viewer`
 
 **Testing & Flexibility:**
-16. ✅ Provide in-memory adapters for testing (no external dependencies)
-17. ✅ Configuration-based adapter selection (env vars, DI container)
-18. ✅ Can run multiple adapters simultaneously during migration
+25. ✅ In-memory adapters: Provide mock implementations for all interfaces
+26. ✅ Configuration-based: Adapter selection via environment variables / DI container
+27. ✅ Unit tests: Use in-memory adapters (no external dependencies)
+28. ✅ Integration tests: Use real adapters against test instances
 
 ---
 
