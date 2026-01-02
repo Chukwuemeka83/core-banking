@@ -1,0 +1,691 @@
+# Cursor IDE Rules for Hexagonal Architecture Refactoring
+
+> **Purpose:** Specific AI coding guidelines for refactoring Phase 0 & Phase 1 to Hexagonal Architecture
+> **Context:** Converting existing vendor-coupled code to vendor-agnostic abstraction layer
+> **Priority:** These rules take precedence over .cursorrules during refactoring work
+
+---
+
+## 🎯 Refactoring Mission
+
+You are refactoring an existing Golang fintech codebase from **vendor-coupled** to **vendor-agnostic Hexagonal Architecture**.
+
+**DO NOT write new features. ONLY refactor existing code.**
+
+---
+
+## 🚨 CRITICAL REFACTORING RULES
+
+### Rule 1: NEVER Break Existing Functionality
+
+```go
+// ❌ BAD: Changing behavior while refactoring
+func (s *AccountService) Deposit(amount decimal.Decimal) error {
+    // Adding new validation that didn't exist before
+    if amount.LessThan(decimal.NewFromInt(10)) {
+        return ErrMinimumDeposit  // DON'T add new logic!
+    }
+    // ...
+}
+
+// ✅ GOOD: Only changing structure, not behavior
+func (s *AccountService) Deposit(amount decimal.Decimal) error {
+    // Exact same validation as before
+    if amount.LessThanOrEqual(decimal.Zero) {
+        return ErrInvalidAmount
+    }
+
+    // Changed from direct vendor call to interface
+    // BEFORE: s.formanceClient.Wallets.Credit(...)
+    // AFTER:  s.walletService.Credit(...)  (same behavior!)
+}
+```
+
+**Refactoring Principle:** Code should behave IDENTICALLY before and after refactoring.
+
+---
+
+### Rule 2: Interface Extraction Strategy
+
+**When extracting interfaces from vendor code:**
+
+1. **Analyze existing usage first**
+   ```bash
+   # Find all places where vendor is used
+   grep -r "formanceClient.Wallets" internal/
+   ```
+
+2. **Extract interface that matches CURRENT usage**
+   ```go
+   // ✅ GOOD: Interface matches what code ACTUALLY uses
+   type WalletService interface {
+       Credit(ctx context.Context, req CreditRequest) (*Transaction, error)
+       Debit(ctx context.Context, req DebitRequest) (*Transaction, error)
+       // Only methods that are CURRENTLY USED
+   }
+
+   // ❌ BAD: Adding methods that aren't used yet
+   type WalletService interface {
+       Credit(...)
+       Debit(...)
+       Transfer(...)      // Not used in Phase 0/1!
+       GetHistory(...)    // Not used in Phase 0/1!
+       CreateWallet(...)  // Not used in Phase 0/1!
+   }
+   ```
+
+3. **Don't over-engineer interfaces**
+   - ONLY extract what exists in current code
+   - Don't add "nice to have" methods
+   - Don't design for future phases
+
+---
+
+### Rule 3: Incremental Refactoring (One Service at a Time)
+
+```
+✅ CORRECT ORDER:
+1. Create WalletService interface
+2. Create FormanceWalletAdapter (wraps existing client)
+3. Create InMemoryWalletAdapter (for tests)
+4. Update ONE service to use interface
+5. Verify tests pass
+6. Commit
+7. Move to NEXT service
+
+❌ WRONG: Refactoring everything at once
+```
+
+**Branch Strategy:**
+```bash
+# One branch per refactoring task
+git checkout -b refactor/R0.2.1-event-store-interface
+# Complete task, test, commit
+git checkout -b refactor/R0.2.2-event-horizon-adapter
+# etc.
+```
+
+---
+
+### Rule 4: Adapter Translation Pattern
+
+**Adapters must translate between domain and vendor:**
+
+```go
+// ✅ GOOD: Clear translation
+type FormanceWalletAdapter struct {
+    client *formance.Client
+}
+
+func (a *FormanceWalletAdapter) Credit(ctx context.Context, req ports.CreditRequest) (*ports.WalletTransaction, error) {
+    // 1. Translate domain request → vendor request
+    formanceReq := &formance.CreditRequest{
+        WalletID: req.WalletID,
+        Amount: &formance.Monetary{
+            Asset:  req.Amount.Currency,
+            Amount: req.Amount.Amount.IntPart(),
+        },
+        Reference: req.Reference,
+        Metadata:  req.Metadata,
+    }
+
+    // 2. Call vendor API
+    resp, err := a.client.Wallets.Credit(ctx, formanceReq)
+    if err != nil {
+        return nil, fmt.Errorf("formance credit failed: %w", err)
+    }
+
+    // 3. Translate vendor response → domain response
+    return &ports.WalletTransaction{
+        ID:       resp.TransactionID,
+        WalletID: req.WalletID,
+        Type:     ports.TransactionTypeCredit,
+        Amount:   req.Amount,
+        Balance: ports.Money{
+            Amount:   decimal.NewFromInt(resp.NewBalance.Amount),
+            Currency: resp.NewBalance.Asset,
+        },
+        Reference: req.Reference,
+        CreatedAt: resp.CreatedAt,
+    }, nil
+}
+
+// ❌ BAD: Leaking vendor types
+func (a *FormanceWalletAdapter) Credit(ctx context.Context, req *formance.CreditRequest) (*formance.CreditResponse, error) {
+    // Returns vendor type directly - NOT vendor-agnostic!
+    return a.client.Wallets.Credit(ctx, req)
+}
+```
+
+---
+
+### Rule 5: In-Memory Adapter Pattern (for Testing)
+
+**ALWAYS create in-memory adapters alongside production adapters:**
+
+```go
+// internal/infrastructure/adapters/wallet/inmemory_wallet_adapter.go
+type InMemoryWalletAdapter struct {
+    wallets      map[string]*WalletState
+    transactions map[string]*ports.WalletTransaction
+    mu           sync.RWMutex
+}
+
+type WalletState struct {
+    ID       string
+    Balance  ports.Money
+    Metadata map[string]string
+}
+
+func NewInMemoryWalletAdapter() *InMemoryWalletAdapter {
+    return &InMemoryWalletAdapter{
+        wallets:      make(map[string]*WalletState),
+        transactions: make(map[string]*ports.WalletTransaction),
+    }
+}
+
+func (a *InMemoryWalletAdapter) Credit(ctx context.Context, req ports.CreditRequest) (*ports.WalletTransaction, error) {
+    a.mu.Lock()
+    defer a.mu.Unlock()
+
+    wallet, exists := a.wallets[req.WalletID]
+    if !exists {
+        return nil, fmt.Errorf("wallet not found: %s", req.WalletID)
+    }
+
+    // Update balance
+    wallet.Balance.Amount = wallet.Balance.Amount.Add(req.Amount.Amount)
+
+    // Create transaction record
+    tx := &ports.WalletTransaction{
+        ID:        uuid.New().String(),
+        WalletID:  req.WalletID,
+        Type:      ports.TransactionTypeCredit,
+        Amount:    req.Amount,
+        Balance:   wallet.Balance,
+        Reference: req.Reference,
+        Metadata:  req.Metadata,
+        CreatedAt: time.Now(),
+    }
+
+    a.transactions[tx.ID] = tx
+
+    return tx, nil
+}
+
+// Implement other interface methods...
+```
+
+**Testing Pattern:**
+```go
+func TestAccountService_Deposit(t *testing.T) {
+    // ✅ Use in-memory adapters (no external dependencies!)
+    walletAdapter := wallet.NewInMemoryWalletAdapter()
+    accountRepo := memory.NewInMemoryAccountRepository()
+    eventBus := eventbus.NewInMemoryEventBusAdapter()
+    logger := logger.NewInMemoryLoggerAdapter()
+
+    service := NewAccountService(walletAdapter, accountRepo, eventBus, logger)
+
+    // Create test wallet
+    walletID := uuid.New().String()
+    walletAdapter.CreateWallet(context.Background(), ports.CreateWalletRequest{
+        ID:       walletID,
+        Currency: "USD",
+    })
+
+    // Test deposit
+    err := service.Deposit(context.Background(), accountID, decimal.NewFromInt(100), "USD")
+    require.NoError(t, err)
+
+    // Verify state in adapter
+    balance, err := walletAdapter.GetBalance(context.Background(), walletID)
+    require.NoError(t, err)
+    assert.Equal(t, decimal.NewFromInt(100), balance.Available.Amount)
+}
+```
+
+---
+
+### Rule 6: Domain Types Must Be Vendor-Agnostic
+
+```go
+// ✅ GOOD: Domain-owned types
+package ports
+
+type Money struct {
+    Amount   decimal.Decimal  // Using standard library
+    Currency string
+}
+
+type CreditRequest struct {
+    WalletID  string
+    Amount    Money           // Domain type!
+    Reference string
+    Metadata  map[string]string
+}
+
+type WalletTransaction struct {
+    ID        string
+    WalletID  string
+    Type      TransactionType
+    Amount    Money           // Domain type!
+    Balance   Money           // Domain type!
+    Reference string
+    Metadata  map[string]string
+    CreatedAt time.Time
+}
+
+// ❌ BAD: Using vendor types in domain
+package ports
+
+import formance "github.com/formancehq/formance-sdk-go"
+
+type CreditRequest struct {
+    WalletID string
+    Amount   *formance.Monetary  // Vendor type leaked into domain!
+}
+```
+
+---
+
+### Rule 7: Update Tests AFTER Refactoring
+
+**Test Refactoring Workflow:**
+
+1. **Before refactoring: Ensure tests pass**
+   ```bash
+   go test ./internal/domain/account/...
+   # All tests should pass with old implementation
+   ```
+
+2. **During refactoring: Tests will break (expected)**
+   ```go
+   // Old test (will break)
+   func TestAccountService_Deposit_OLD(t *testing.T) {
+       mockFormanceClient := &MockFormanceClient{}
+       service := &AccountService{formanceClient: mockFormanceClient}
+       // ...
+   }
+   ```
+
+3. **After refactoring: Update tests to use adapters**
+   ```go
+   // New test (using in-memory adapters)
+   func TestAccountService_Deposit(t *testing.T) {
+       walletAdapter := wallet.NewInMemoryWalletAdapter()
+       service := NewAccountService(walletAdapter, ...)
+       // ...
+   }
+   ```
+
+4. **Verify tests pass with new implementation**
+   ```bash
+   go test ./internal/domain/account/...
+   # All tests should pass with new implementation
+   ```
+
+---
+
+### Rule 8: Dependency Injection Pattern
+
+**Service Constructor Pattern:**
+
+```go
+// ✅ GOOD: Inject interfaces
+type AccountService struct {
+    walletService ports.WalletService           // Interface!
+    ledgerService ports.LedgerService           // Interface!
+    authz         ports.AuthorizationProvider   // Interface!
+    eventBus      sharedports.EventBus          // Interface!
+    logger        sharedports.Logger            // Interface!
+}
+
+func NewAccountService(
+    walletService ports.WalletService,
+    ledgerService ports.LedgerService,
+    authz ports.AuthorizationProvider,
+    eventBus sharedports.EventBus,
+    logger sharedports.Logger,
+) *AccountService {
+    return &AccountService{
+        walletService: walletService,
+        ledgerService: ledgerService,
+        authz:         authz,
+        eventBus:      eventBus,
+        logger:        logger,
+    }
+}
+
+// ❌ BAD: Direct vendor dependencies
+type AccountService struct {
+    formanceClient *formance.Client
+    ketoClient     *keto.APIClient
+    redis          *redis.Client
+}
+```
+
+---
+
+### Rule 9: DI Container Wiring
+
+**Configuration-Based Adapter Selection:**
+
+```go
+// internal/infrastructure/config/container.go
+func (c *Container) wireWalletService(cfg Config) error {
+    switch cfg.WalletProvider {
+    case "formance":
+        c.WalletService = wallet.NewFormanceWalletAdapter(
+            cfg.FormanceConfig.APIKey,
+            cfg.FormanceConfig.BaseURL,
+        )
+    case "tigerbeetle":
+        c.WalletService = wallet.NewTigerBeetleWalletAdapter(
+            cfg.TigerBeetleConfig.ClusterID,
+            cfg.TigerBeetleConfig.Addresses,
+        )
+    case "inmemory":
+        c.WalletService = wallet.NewInMemoryWalletAdapter()
+    default:
+        c.WalletService = wallet.NewFormanceWalletAdapter(
+            cfg.FormanceConfig.APIKey,
+            cfg.FormanceConfig.BaseURL,
+        )
+    }
+    return nil
+}
+```
+
+**Environment-Based Configuration:**
+
+```yaml
+# config/development.yaml
+wallet_provider: "inmemory"
+ledger_provider: "inmemory"
+authz_provider: "inmemory"
+
+# config/staging.yaml
+wallet_provider: "formance"
+ledger_provider: "formance"
+authz_provider: "ory-keto"
+
+# config/production.yaml
+wallet_provider: "formance"
+ledger_provider: "formance"
+authz_provider: "ory-keto"
+```
+
+---
+
+## 📝 Refactoring Checklist (Per Task)
+
+**Before Starting:**
+- [ ] Read existing code thoroughly
+- [ ] Identify all vendor usages
+- [ ] Document current behavior
+- [ ] Ensure existing tests pass
+
+**During Refactoring:**
+- [ ] Create port interface in `domain/**/ports/`
+- [ ] Create production adapter in `infrastructure/adapters/`
+- [ ] Create in-memory adapter for testing
+- [ ] Update service to use interface (constructor injection)
+- [ ] Update DI container wiring
+- [ ] Update tests to use in-memory adapters
+
+**After Refactoring:**
+- [ ] Run tests: `go test ./...` (all should pass)
+- [ ] Check vendor imports: `./scripts/refactoring/refactor-to-hexagonal.sh check-imports`
+- [ ] Verify no infrastructure imports in domain
+- [ ] Manual testing (if applicable)
+- [ ] Commit with descriptive message
+
+---
+
+## 🔍 Validation Commands
+
+**Use these commands before committing:**
+
+```bash
+# 1. Check for vendor imports in domain
+./scripts/refactoring/refactor-to-hexagonal.sh check-imports
+
+# 2. Check for infrastructure imports in domain
+./scripts/refactoring/refactor-to-hexagonal.sh check-infra
+
+# 3. Find direct vendor usages
+./scripts/refactoring/refactor-to-hexagonal.sh find-usages
+
+# 4. Run all validation checks
+./scripts/refactoring/refactor-to-hexagonal.sh validate
+
+# 5. Run tests
+go test ./...
+
+# 6. Run tests with coverage
+go test -cover ./...
+```
+
+---
+
+## 🚫 Common Refactoring Pitfalls
+
+### Pitfall 1: Changing Behavior While Refactoring
+
+```go
+// ❌ BAD: Adding new validation
+func (s *AccountService) Deposit(amount decimal.Decimal) error {
+    if amount.LessThan(decimal.NewFromInt(10)) {
+        return ErrMinimumDeposit  // NEW logic!
+    }
+    // ...
+}
+
+// ✅ GOOD: Keeping exact same logic
+func (s *AccountService) Deposit(amount decimal.Decimal) error {
+    // Same validation as before refactoring
+    if amount.LessThanOrEqual(decimal.Zero) {
+        return ErrInvalidAmount
+    }
+    // ...
+}
+```
+
+### Pitfall 2: Over-Engineering Interfaces
+
+```go
+// ❌ BAD: Interface with unused methods
+type WalletService interface {
+    Credit(...)
+    Debit(...)
+    Transfer(...)       // Not used in Phase 0/1!
+    GetHistory(...)     // Not used in Phase 0/1!
+    CreateWallet(...)   // Not used in Phase 0/1!
+    UpdateMetadata(...) // Not used in Phase 0/1!
+    FreezeWallet(...)   // Not used in Phase 0/1!
+}
+
+// ✅ GOOD: Minimal interface (only what's used)
+type WalletService interface {
+    Credit(ctx context.Context, req CreditRequest) (*WalletTransaction, error)
+    Debit(ctx context.Context, req DebitRequest) (*WalletTransaction, error)
+    GetBalance(ctx context.Context, walletID string) (*Balance, error)
+}
+```
+
+### Pitfall 3: Leaking Vendor Types
+
+```go
+// ❌ BAD: Vendor types in interface
+import formance "github.com/formancehq/formance-sdk-go"
+
+type WalletService interface {
+    Credit(ctx context.Context, req *formance.CreditRequest) (*formance.CreditResponse, error)
+}
+
+// ✅ GOOD: Domain types only
+type WalletService interface {
+    Credit(ctx context.Context, req CreditRequest) (*WalletTransaction, error)
+}
+
+type CreditRequest struct {
+    WalletID  string
+    Amount    Money  // Domain type
+    Reference string
+    Metadata  map[string]string
+}
+```
+
+### Pitfall 4: Not Creating In-Memory Adapters
+
+```go
+// ❌ BAD: Only creating production adapter
+// infrastructure/adapters/wallet/
+//   formance_wallet_adapter.go  (only this!)
+
+// ✅ GOOD: Creating both production and in-memory
+// infrastructure/adapters/wallet/
+//   formance_wallet_adapter.go
+//   inmemory_wallet_adapter.go
+//   tigerbeetle_wallet_adapter.go (optional alternative)
+```
+
+### Pitfall 5: Breaking Tests During Refactoring
+
+```go
+// ❌ BAD: Refactoring code without updating tests
+// (tests will fail)
+
+// ✅ GOOD: Update tests immediately after refactoring
+func TestAccountService_Deposit(t *testing.T) {
+    // Use in-memory adapters
+    walletAdapter := wallet.NewInMemoryWalletAdapter()
+    service := NewAccountService(walletAdapter, ...)
+
+    // Test should pass
+}
+```
+
+---
+
+## 📊 Refactoring Progress Tracking
+
+**Use TODO comments to track refactoring:**
+
+```go
+// TODO(refactor): R1.1.1 - Extract WalletService interface
+// TODO(refactor): R1.1.2 - Create Formance wallet adapter
+// TODO(refactor): R1.1.3 - Create in-memory wallet adapter
+// TODO(refactor): R1.1.4 - Update AccountService to use interface
+
+// After completing:
+// ✅ R1.1.1 - WalletService interface created
+// ✅ R1.1.2 - Formance adapter created
+```
+
+---
+
+## 🎓 Learning from Existing Code
+
+**Before refactoring ANY service:**
+
+1. **Read the service thoroughly**
+   ```bash
+   # Example: Reading AccountService
+   cat internal/application/service/account_service.go
+   ```
+
+2. **Trace vendor usage**
+   ```bash
+   # Find all formanceClient calls
+   grep -n "s.formanceClient" internal/application/service/account_service.go
+   ```
+
+3. **Document what methods are actually used**
+   ```
+   AccountService uses:
+   - formanceClient.Wallets.Credit()
+   - formanceClient.Wallets.Debit()
+   - formanceClient.Wallets.GetBalance()
+
+   → Create WalletService interface with these 3 methods ONLY
+   ```
+
+4. **Extract interface matching ACTUAL usage**
+
+---
+
+## 🔄 Backward Compatibility Strategy
+
+**Keep old constructors temporarily:**
+
+```go
+// New constructor (preferred)
+func NewAccountService(
+    walletService ports.WalletService,
+    ledgerService ports.LedgerService,
+    authz ports.AuthorizationProvider,
+    eventBus sharedports.EventBus,
+    logger sharedports.Logger,
+) *AccountService {
+    return &AccountService{
+        walletService: walletService,
+        ledgerService: ledgerService,
+        authz:         authz,
+        eventBus:      eventBus,
+        logger:        logger,
+    }
+}
+
+// Legacy constructor (deprecated, for gradual migration)
+// Deprecated: Use NewAccountService with injected adapters instead
+func NewAccountServiceWithFormance(formanceClient *formance.Client) *AccountService {
+    walletAdapter := wallet.NewFormanceWalletAdapter(
+        formanceClient.APIKey,
+        formanceClient.BaseURL,
+    )
+    ledgerAdapter := ledger.NewFormanceLedgerAdapter(
+        formanceClient.APIKey,
+        formanceClient.BaseURL,
+    )
+
+    return NewAccountService(
+        walletAdapter,
+        ledgerAdapter,
+        // ... other dependencies
+    )
+}
+```
+
+---
+
+## ✅ Definition of Done (Per Refactoring Task)
+
+**A refactoring task is complete when:**
+
+1. ✅ Port interface created in `domain/**/ports/`
+2. ✅ Production adapter created in `infrastructure/adapters/`
+3. ✅ In-memory adapter created for testing
+4. ✅ Service updated to use injected interface
+5. ✅ DI container wiring added
+6. ✅ Tests updated and passing
+7. ✅ No vendor imports in domain layer
+8. ✅ No infrastructure imports in domain layer
+9. ✅ Validation checks pass
+10. ✅ Committed with descriptive message
+
+---
+
+**Remember:**
+- 🎯 **Goal:** Refactor, not rewrite
+- 🔒 **Constraint:** Keep behavior identical
+- 📦 **Pattern:** Interface extraction + Adapter creation
+- 🧪 **Testing:** In-memory adapters for unit tests
+- 🔄 **Process:** One service at a time
+
+**Last Updated:** 2026-01-02
+**Refactoring Context:** Phase 0 & Phase 1 to Hexagonal Architecture
+
+🤖 Generated with [Claude Code](https://claude.ai/code)
+Co-Authored-By: Claude <noreply@anthropic.com>
