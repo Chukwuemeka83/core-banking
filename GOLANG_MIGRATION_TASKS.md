@@ -26,6 +26,72 @@
 
 ---
 
+### **🔌 Hexagonal Architecture (Ports & Adapters)**
+
+**CRITICAL DESIGN PRINCIPLE:** Decouple business logic from infrastructure vendors.
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                    DOMAIN LAYER                          │
+│  ┌────────────────────────────────────────────────┐      │
+│  │  Business Logic (Pure Go, No Vendor Imports)   │      │
+│  │  • Aggregates, Entities, Value Objects         │      │
+│  │  • Domain Services, Commands, Queries          │      │
+│  └────────────────┬───────────────────────────────┘      │
+│                   │ Depends on ▼                          │
+│  ┌────────────────▼───────────────────────────────┐      │
+│  │  PORTS (Interfaces - Defined by Domain)        │      │
+│  │  • LedgerService interface                     │      │
+│  │  • WalletService interface                     │      │
+│  │  • IdentityProvider interface                  │      │
+│  │  • AuthorizationProvider interface             │      │
+│  │  • EventStore interface                        │      │
+│  └────────────────────────────────────────────────┘      │
+└──────────────────────────────────────────────────────────┘
+                          │ Implemented by ▼
+┌──────────────────────────────────────────────────────────┐
+│               INFRASTRUCTURE LAYER                        │
+│  ┌──────────────────────────────────────────────────┐    │
+│  │  ADAPTERS (Implementations - Pluggable)          │    │
+│  │  • FormanceLedgerAdapter (implements LedgerSvc)  │    │
+│  │  • FormanceWalletAdapter (implements WalletSvc)  │    │
+│  │  • OryKratosAdapter (implements IdentityProv)    │    │
+│  │  • OryKetoAdapter (implements AuthzProvider)     │    │
+│  │  • EventHorizonAdapter (implements EventStore)   │    │
+│  │  • TemporalAdapter (implements WorkflowOrch)     │    │
+│  └──────────────────────────────────────────────────┘    │
+│                                                            │
+│  Alternative Adapters (Swap without changing domain):     │
+│  • TigerBeetleAdapter, Auth0Adapter, CasbinAdapter, etc. │
+└──────────────────────────────────────────────────────────┘
+```
+
+**Benefits:**
+- ✅ **Vendor Independence**: Switch Formance → TigerBeetle without changing business logic
+- ✅ **Testability**: Mock interfaces for unit tests (no external services needed)
+- ✅ **Flexibility**: Run with in-memory adapters in development
+- ✅ **Migration**: Gradual migration from one vendor to another
+- ✅ **Cost Control**: Switch to cheaper alternatives when needed
+
+**Example:**
+```go
+// ❌ BAD: Domain imports vendor directly
+import "github.com/formancehq/formance-sdk-go"  // NEVER in domain!
+
+// ✅ GOOD: Domain depends on interface
+type LedgerService interface {
+    CreateTransaction(ctx, tx) error
+    GetBalance(ctx, walletID) (Balance, error)
+}
+
+// Adapter implements interface
+type FormanceLedgerAdapter struct {
+    client *formance.Client  // Vendor import OK in adapter
+}
+```
+
+---
+
 ### **The Cell-Based Model**
 
 We are building a **Strict Multi-Tenant (Shared-Nothing)** fintech platform divided into two distinct planes:
@@ -43,20 +109,25 @@ We are building a **Strict Multi-Tenant (Shared-Nothing)** fintech platform divi
   - Dedicated Formance Ledger Instance
   - Dedicated Formance Wallets Instance
 
-### **Technology Stack**
+### **Technology Stack (Vendor-Agnostic Architecture)**
 
-| Component | Solution | Scope | Used For |
-|-----------|----------|-------|----------|
-| **Identity** | Ory Kratos | Tenant-scoped (per-realm authentication) | All authentication |
-| **Authorization** | Ory Keto | Global service with tenant namespaces (ReBAC) | All permissions |
-| **Gateway/Router** | Ory Oathkeeper | Global (routes by domain to tenant silos) | Request routing |
-| **Asset Engine** | Formance Wallets | Tenant-scoped (multi-asset balance management) | **Financial domains** |
-| **Immutable Ledger** | Formance Ledger | Tenant-scoped (double-entry transaction log) | **Financial domains** |
-| **Event Sourcing** | Event Horizon | Tenant-scoped (event store + projections) | **Non-financial domains** |
-| **Workflows** | Temporal | Global + Per-Tenant queues (sagas, provisioning) | All orchestration |
-| **Database** | PostgreSQL 16 | Schema-per-tenant (physical isolation) | All persistence |
-| **Cache** | Redis 7 | Tenant-scoped (namespace per tenant) | All caching |
-| **Observability** | OpenTelemetry + Jaeger + Prometheus | Global with tenant context | All monitoring |
+**CRITICAL:** We use **Hexagonal Architecture (Ports & Adapters)** to decouple from vendors.
+
+| Component | Port (Interface) | Default Adapter | Alternative Adapters |
+|-----------|------------------|-----------------|----------------------|
+| **Identity** | `IdentityProvider` | Ory Kratos | Auth0, Keycloak, Cognito, Custom |
+| **Authorization** | `AuthorizationProvider` | Ory Keto (ReBAC) | Casbin, OPA, Custom RBAC |
+| **Gateway** | `APIGateway` | Ory Oathkeeper | Kong, Traefik, Envoy, Custom |
+| **Financial Ledger** | `LedgerService` | Formance Ledger | TigerBeetle, Custom, PostgreSQL |
+| **Wallet Engine** | `WalletService` | Formance Wallets | Custom, Blockchain Nodes |
+| **Event Store** | `EventStore` | Event Horizon (PostgreSQL) | EventStoreDB, Custom PostgreSQL |
+| **Event Bus** | `EventBus` | Redis Streams | NATS, Kafka, RabbitMQ |
+| **Workflow Engine** | `WorkflowOrchestrator` | Temporal | Cadence, Custom State Machine |
+| **Database** | Standard SQL | PostgreSQL 16 | MySQL, CockroachDB |
+| **Cache** | Standard Cache | Redis 7 | Memcached, Valkey |
+| **Observability** | Standard Telemetry | OpenTelemetry | Datadog, New Relic |
+
+**Key Principle:** Business logic NEVER imports vendor packages directly. Only adapters do.
 
 ### **Data Hierarchy**
 
@@ -125,16 +196,32 @@ Logic: If yes, inherit full access to all Account's wallets
 
 > **MUST FOLLOW:**
 >
-> 1. **Strict Plane Separation:** Control Plane NEVER accesses Tenant Plane data
-> 2. **Schema Isolation:** Middleware MUST set `search_path` per request
-> 3. **No Custom Auth:** Use Ory Kratos UUIDs as FK (NO password storage)
-> 4. **No Custom Wallets (Financial):** Use Formance Wallets API (NO balance in Postgres)
-> 5. **Hybrid Event Strategy:** Financial = Formance, Non-Financial = Event Horizon
-> 6. **Event Sourcing for Workflows:** Compliance, KYC, Governance, AI use Event Horizon
-> 7. **Formance as Financial Source of Truth:** PostgreSQL stores mappings ONLY for financial data
-> 8. **Ory Keto for Permissions:** Implement two-layer fallback strategy
-> 9. **Tenant Provisioning via Temporal:** Atomic workflow with compensation
-> 10. **All Entities Tenant-Scoped:** No global user/wallet/event tables
+> **Architectural Principles:**
+> 1. **Hexagonal Architecture:** Domain depends on INTERFACES, not vendor SDKs
+> 2. **Dependency Inversion:** Infrastructure implements domain interfaces
+> 3. **Vendor Independence:** All vendor SDKs isolated in adapter layer
+> 4. **Interface Segregation:** Each port has single, focused responsibility
+>
+> **Multi-Tenancy:**
+> 5. **Strict Plane Separation:** Control Plane NEVER accesses Tenant Plane data
+> 6. **Schema Isolation:** Middleware MUST set `search_path` per request
+> 7. **All Entities Tenant-Scoped:** No global user/wallet/event tables
+>
+> **Hybrid Event Strategy:**
+> 8. **Financial Operations:** Use `LedgerService` interface (default: Formance adapter)
+> 9. **Non-Financial Workflows:** Use `EventStore` interface (default: Event Horizon adapter)
+> 10. **Clear Domain Classification:** Financial vs Non-Financial strictly separated
+>
+> **Security & Identity:**
+> 11. **Identity Abstraction:** Use `IdentityProvider` interface (default: Ory Kratos adapter)
+> 12. **Authorization Abstraction:** Use `AuthorizationProvider` interface (default: Ory Keto adapter)
+> 13. **NO Password Storage:** Identity provider handles authentication
+> 14. **NO Balance in PostgreSQL:** Ledger service handles financial state
+>
+> **Testing & Flexibility:**
+> 15. **Mock Adapters:** Provide in-memory implementations for testing
+> 16. **Configuration-Based:** Adapter selection via config (DI container)
+> 17. **Gradual Migration:** Can run multiple adapters simultaneously
 
 ---
 
@@ -1739,73 +1826,208 @@ func TenantSchemaMiddleware(db *gorm.DB) gin.HandlerFunc {
 }
 ```
 
-### Pattern 2: Formance Wallet Operations
+### Pattern 2: Vendor-Agnostic Wallet Operations (Hexagonal Architecture)
 
 ```go
-// Deposit to wallet
-func (s *WalletService) Deposit(ctx context.Context, walletID uuid.UUID, amount decimal.Decimal, currency string) error {
-    // Get wallet mapping
-    wallet, err := s.repo.GetWallet(ctx, walletID)
+// ✅ DOMAIN LAYER: Define interface (port)
+package domain
+
+type WalletService interface {
+    Credit(ctx context.Context, req CreditRequest) (*Transaction, error)
+    Debit(ctx context.Context, req DebitRequest) (*Transaction, error)
+    GetBalance(ctx context.Context, walletID string) (*Balance, error)
+    Transfer(ctx context.Context, req TransferRequest) (*Transaction, error)
+}
+
+// Domain types (vendor-agnostic)
+type CreditRequest struct {
+    WalletID string
+    Amount   Money
+    Metadata map[string]string
+}
+
+type Money struct {
+    Amount   decimal.Decimal
+    Currency string
+}
+
+// ✅ APPLICATION LAYER: Use interface (business logic)
+package application
+
+type DepositService struct {
+    walletService domain.WalletService  // Interface, not vendor!
+    walletRepo    domain.WalletRepository
+}
+
+func (s *DepositService) ProcessDeposit(ctx context.Context, cmd DepositCommand) error {
+    wallet, err := s.walletRepo.GetByID(ctx, cmd.WalletID)
     if err != nil {
         return err
     }
 
-    // Call Formance Wallets API
-    _, err = s.formanceClient.Wallets.Credit(ctx, &formance.CreditRequest{
-        WalletID: wallet.FormanceWalletID,
-        Amount: &formance.Monetary{
-            Asset: currency,
-            Amount: amount.IntPart(), // Convert to smallest unit
+    // Call through interface (vendor-agnostic!)
+    _, err = s.walletService.Credit(ctx, domain.CreditRequest{
+        WalletID: wallet.ExternalID,
+        Amount: domain.Money{
+            Amount:   cmd.Amount,
+            Currency: cmd.Currency,
         },
         Metadata: map[string]string{
-            "internal_wallet_id": walletID.String(),
-            "operation": "deposit",
+            "deposit_id": cmd.DepositID.String(),
+            "source":     "bank_transfer",
         },
     })
 
     return err
 }
+
+// ✅ INFRASTRUCTURE LAYER: Implement interface (adapter)
+package adapters
+
+import formance "github.com/formancehq/formance-sdk-go"  // Only adapters import vendors!
+
+type FormanceWalletAdapter struct {
+    client *formance.Client
+}
+
+// Implements domain.WalletService interface
+func (a *FormanceWalletAdapter) Credit(ctx context.Context, req domain.CreditRequest) (*domain.Transaction, error) {
+    // Translate domain request to vendor request
+    formanceReq := &formance.CreditRequest{
+        WalletID: req.WalletID,
+        Amount: &formance.Monetary{
+            Asset:  req.Amount.Currency,
+            Amount: req.Amount.Amount.IntPart(),
+        },
+        Metadata: req.Metadata,
+    }
+
+    resp, err := a.client.Wallets.Credit(ctx, formanceReq)
+    if err != nil {
+        return nil, err
+    }
+
+    // Translate vendor response to domain response
+    return &domain.Transaction{
+        ID:       resp.TransactionID,
+        WalletID: req.WalletID,
+        Amount:   req.Amount,
+        Type:     "credit",
+    }, nil
+}
+
+// ✅ INFRASTRUCTURE: Alternative adapter (can swap!)
+package adapters
+
+type TigerBeetleWalletAdapter struct {
+    client *tigerbeetle.Client
+}
+
+func (a *TigerBeetleWalletAdapter) Credit(ctx context.Context, req domain.CreditRequest) (*domain.Transaction, error) {
+    // Different vendor, same interface!
+    // Business logic unchanged!
+}
 ```
 
-### Pattern 3: Ory Keto Two-Layer Permission Check
+### Pattern 3: Vendor-Agnostic Authorization (Two-Layer Permissions)
 
 ```go
-func (s *PermissionService) CanDebitWallet(ctx context.Context, userID, walletID string) (bool, error) {
+// ✅ DOMAIN LAYER: Define interface (port)
+package domain
+
+type AuthorizationProvider interface {
+    CheckPermission(ctx context.Context, req PermissionCheckRequest) (bool, error)
+    GrantPermission(ctx context.Context, req GrantPermissionRequest) error
+    RevokePermission(ctx context.Context, req RevokePermissionRequest) error
+    ListPermissions(ctx context.Context, subject string) ([]Permission, error)
+}
+
+type PermissionCheckRequest struct {
+    Subject  string  // "user:123"
+    Resource string  // "wallet:456"
+    Action   string  // "debit", "credit", "view"
+}
+
+// ✅ APPLICATION LAYER: Use interface
+package application
+
+type WalletPermissionService struct {
+    authz domain.AuthorizationProvider  // Interface!
+}
+
+func (s *WalletPermissionService) CanDebitWallet(ctx context.Context, userID, walletID string) (bool, error) {
     // Layer 1: Check direct wallet permission
-    allowed, err := s.ketoClient.Check(ctx, &keto.CheckRequest{
-        Namespace: "wallets",
-        Object: walletID,
-        Relation: "can_debit",
-        Subject: fmt.Sprintf("user:%s", userID),
+    allowed, err := s.authz.CheckPermission(ctx, domain.PermissionCheckRequest{
+        Subject:  fmt.Sprintf("user:%s", userID),
+        Resource: fmt.Sprintf("wallet:%s", walletID),
+        Action:   "debit",
     })
     if err != nil {
         return false, err
     }
     if allowed {
-        return true, nil // Explicit permission
+        return true, nil
     }
 
-    // Layer 2: Check account membership
-    // Get parent account
-    walletParent, _ := s.ketoClient.ListObjects(ctx, &keto.ListRequest{
-        Namespace: "wallets",
-        Object: walletID,
-        Relation: "parent",
+    // Layer 2: Check account membership (fallback)
+    allowed, err = s.authz.CheckPermission(ctx, domain.PermissionCheckRequest{
+        Subject:  fmt.Sprintf("user:%s", userID),
+        Resource: fmt.Sprintf("wallet:%s", walletID),
+        Action:   "account_admin",  // Inherited from parent account
     })
 
-    if len(walletParent) == 0 {
-        return false, nil
+    return allowed, err
+}
+
+// ✅ INFRASTRUCTURE: Ory Keto adapter
+package adapters
+
+import keto "github.com/ory/keto-client-go"
+
+type OryKetoAuthzAdapter struct {
+    client *keto.APIClient
+}
+
+func (a *OryKetoAuthzAdapter) CheckPermission(ctx context.Context, req domain.PermissionCheckRequest) (bool, error) {
+    // Translate to Keto API
+    result, _, err := a.client.PermissionApi.CheckPermission(ctx).
+        Namespace("finaegis").
+        Object(req.Resource).
+        Relation(req.Action).
+        SubjectId(req.Subject).
+        Execute()
+
+    if err != nil {
+        return false, err
     }
 
-    accountID := walletParent[0]
+    return result.Allowed, nil
+}
 
-    // Check if user is admin of account
-    return s.ketoClient.Check(ctx, &keto.CheckRequest{
-        Namespace: "accounts",
-        Object: accountID,
-        Relation: "admin",
-        Subject: fmt.Sprintf("user:%s", userID),
-    })
+// ✅ INFRASTRUCTURE: Alternative Casbin adapter
+package adapters
+
+import "github.com/casbin/casbin/v2"
+
+type CasbinAuthzAdapter struct {
+    enforcer *casbin.Enforcer
+}
+
+func (a *CasbinAuthzAdapter) CheckPermission(ctx context.Context, req domain.PermissionCheckRequest) (bool, error) {
+    // Different vendor, same interface!
+    return a.enforcer.Enforce(req.Subject, req.Resource, req.Action)
+}
+
+// ✅ INFRASTRUCTURE: In-memory mock for testing
+package adapters
+
+type InMemoryAuthzAdapter struct {
+    permissions map[string]bool
+}
+
+func (a *InMemoryAuthzAdapter) CheckPermission(ctx context.Context, req domain.PermissionCheckRequest) (bool, error) {
+    key := fmt.Sprintf("%s:%s:%s", req.Subject, req.Resource, req.Action)
+    return a.permissions[key], nil
 }
 ```
 
@@ -2001,6 +2223,207 @@ func (q *AccountQueryService) GetAccountSummary(ctx context.Context, accountID u
     }, nil
 }
 ```
+
+### Pattern 6: Dependency Injection & Adapter Wiring
+
+```go
+// ✅ Configuration-based adapter selection
+package main
+
+import (
+    "github.com/finaegis/core/internal/domain"
+    "github.com/finaegis/core/internal/infrastructure/adapters"
+)
+
+type Config struct {
+    WalletProvider   string  // "formance", "tigerbeetle", "inmemory"
+    AuthzProvider    string  // "ory-keto", "casbin", "inmemory"
+    LedgerProvider   string  // "formance", "custom"
+    IdentityProvider string  // "ory-kratos", "auth0", "keycloak"
+}
+
+// Container wires dependencies
+type Container struct {
+    walletService   domain.WalletService
+    authzProvider   domain.AuthorizationProvider
+    ledgerService   domain.LedgerService
+    identityService domain.IdentityProvider
+}
+
+func NewContainer(cfg Config) *Container {
+    c := &Container{}
+
+    // Wire wallet service based on config
+    switch cfg.WalletProvider {
+    case "formance":
+        c.walletService = adapters.NewFormanceWalletAdapter(cfg.FormanceAPIKey)
+    case "tigerbeetle":
+        c.walletService = adapters.NewTigerBeetleAdapter(cfg.TigerBeetleURL)
+    case "inmemory":
+        c.walletService = adapters.NewInMemoryWalletAdapter()
+    default:
+        panic("unknown wallet provider: " + cfg.WalletProvider)
+    }
+
+    // Wire authorization provider
+    switch cfg.AuthzProvider {
+    case "ory-keto":
+        c.authzProvider = adapters.NewOryKetoAdapter(cfg.KetoURL)
+    case "casbin":
+        c.authzProvider = adapters.NewCasbinAdapter(cfg.CasbinModel)
+    case "inmemory":
+        c.authzProvider = adapters.NewInMemoryAuthzAdapter()
+    }
+
+    // Wire ledger service
+    switch cfg.LedgerProvider {
+    case "formance":
+        c.ledgerService = adapters.NewFormanceLedgerAdapter(cfg.FormanceAPIKey)
+    case "custom":
+        c.ledgerService = adapters.NewCustomLedgerAdapter()
+    }
+
+    // Wire identity provider
+    switch cfg.IdentityProvider {
+    case "ory-kratos":
+        c.identityService = adapters.NewOryKratosAdapter(cfg.KratosURL)
+    case "auth0":
+        c.identityService = adapters.NewAuth0Adapter(cfg.Auth0Domain)
+    case "keycloak":
+        c.identityService = adapters.NewKeycloakAdapter(cfg.KeycloakURL)
+    }
+
+    return c
+}
+
+// Application services receive interfaces
+func (c *Container) NewPaymentService() *application.PaymentService {
+    return &application.PaymentService{
+        walletService: c.walletService,   // Injected!
+        ledgerService: c.ledgerService,   // Injected!
+        authz:         c.authzProvider,   // Injected!
+    }
+}
+
+// ✅ Environment-specific configuration
+// .env.development
+WALLET_PROVIDER=inmemory
+AUTHZ_PROVIDER=inmemory
+LEDGER_PROVIDER=inmemory
+
+// .env.staging
+WALLET_PROVIDER=formance
+AUTHZ_PROVIDER=ory-keto
+LEDGER_PROVIDER=formance
+
+// .env.production
+WALLET_PROVIDER=formance
+AUTHZ_PROVIDER=ory-keto
+LEDGER_PROVIDER=formance
+
+// ✅ Testing with mocks (no external dependencies!)
+package application_test
+
+func TestPaymentService_ProcessDeposit(t *testing.T) {
+    // Use in-memory adapters for testing!
+    mockWallet := adapters.NewInMemoryWalletAdapter()
+    mockAuthz := adapters.NewInMemoryAuthzAdapter()
+
+    service := &application.PaymentService{
+        walletService: mockWallet,
+        authz:         mockAuthz,
+    }
+
+    // Test business logic without external services!
+    err := service.ProcessDeposit(ctx, cmd)
+    assert.NoError(t, err)
+}
+```
+
+### Pattern 7: Folder Structure (Hexagonal Architecture)
+
+```
+finaegis-go/
+├── internal/
+│   ├── domain/                    # ✅ CORE: Pure business logic
+│   │   ├── account/
+│   │   │   ├── aggregate/        # Entities, aggregates
+│   │   │   ├── valueobject/      # Value objects
+│   │   │   ├── service/          # Domain services
+│   │   │   └── ports/            # 🔌 INTERFACES (defined by domain!)
+│   │   │       ├── wallet.go     # type WalletService interface
+│   │   │       ├── ledger.go     # type LedgerService interface
+│   │   │       ├── authz.go      # type AuthorizationProvider interface
+│   │   │       └── identity.go   # type IdentityProvider interface
+│   │   ├── payment/
+│   │   │   └── ports/
+│   │   │       └── payment_gateway.go
+│   │   └── shared/
+│   │       └── ports/            # Shared interfaces
+│   │           ├── event_store.go
+│   │           ├── event_bus.go
+│   │           └── repository.go
+│   │
+│   ├── application/              # ✅ USE CASES: Orchestration
+│   │   ├── payment/
+│   │   │   ├── deposit_service.go      # Uses domain.WalletService interface
+│   │   │   ├── withdraw_service.go     # Uses domain.WalletService interface
+│   │   │   └── transfer_service.go     # Uses domain.LedgerService interface
+│   │   └── account/
+│   │       └── account_service.go      # Uses domain.AuthorizationProvider
+│   │
+│   └── infrastructure/           # ✅ ADAPTERS: Implementations
+│       ├── adapters/             # 🔌 Concrete implementations
+│       │   ├── wallet/
+│       │   │   ├── formance_wallet_adapter.go      # implements domain.WalletService
+│       │   │   ├── tigerbeetle_wallet_adapter.go   # implements domain.WalletService
+│       │   │   └── inmemory_wallet_adapter.go      # implements domain.WalletService
+│       │   ├── ledger/
+│       │   │   ├── formance_ledger_adapter.go      # implements domain.LedgerService
+│       │   │   ├── custom_ledger_adapter.go        # implements domain.LedgerService
+│       │   │   └── inmemory_ledger_adapter.go
+│       │   ├── authz/
+│       │   │   ├── ory_keto_adapter.go             # implements domain.AuthorizationProvider
+│       │   │   ├── casbin_adapter.go               # implements domain.AuthorizationProvider
+│       │   │   ├── opa_adapter.go                  # implements domain.AuthorizationProvider
+│       │   │   └── inmemory_authz_adapter.go
+│       │   ├── identity/
+│       │   │   ├── ory_kratos_adapter.go           # implements domain.IdentityProvider
+│       │   │   ├── auth0_adapter.go                # implements domain.IdentityProvider
+│       │   │   ├── keycloak_adapter.go             # implements domain.IdentityProvider
+│       │   │   └── inmemory_identity_adapter.go
+│       │   ├── eventstore/
+│       │   │   ├── eventhorizon_adapter.go         # implements domain.EventStore
+│       │   │   ├── eventstoredb_adapter.go         # implements domain.EventStore
+│       │   │   └── postgres_eventstore_adapter.go
+│       │   └── gateway/
+│       │       ├── ory_oathkeeper_adapter.go       # implements domain.APIGateway
+│       │       ├── kong_adapter.go                 # implements domain.APIGateway
+│       │       └── envoy_adapter.go
+│       ├── persistence/          # Database repositories
+│       ├── http/                 # HTTP handlers
+│       └── config/               # DI container, wiring
+│           └── container.go      # Adapter selection logic
+│
+├── cmd/
+│   └── api-server/
+│       └── main.go               # Wires adapters based on env config
+│
+└── test/
+    └── adapters/                 # In-memory test adapters
+        ├── mock_wallet_adapter.go
+        ├── mock_authz_adapter.go
+        └── mock_ledger_adapter.go
+```
+
+**Key Rules:**
+1. ✅ `internal/domain/**/ports/` = Interfaces defined BY domain (NOT by infrastructure!)
+2. ✅ `internal/infrastructure/adapters/` = Vendor-specific implementations
+3. ❌ Domain layer NEVER imports `github.com/formancehq/*` or `github.com/ory/*`
+4. ❌ Domain layer NEVER imports `internal/infrastructure/*`
+5. ✅ Infrastructure imports domain to implement interfaces
+6. ✅ Application layer injects adapters via constructor
+7. ✅ `cmd/main.go` wires adapters based on environment config
 
 ---
 
