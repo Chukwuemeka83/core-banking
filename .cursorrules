@@ -1,3 +1,74 @@
+# FinAegis Golang Fintech Platform - Cursor AI Rules (Cell-Based Architecture)
+
+> **Complete development guidelines for building Cell-Based, multi-tenant fintech platform in Go**
+>
+> Project: PHP/Laravel → Golang Migration
+> Architecture: Cell-Based (Shared-Nothing) + Ory Stack + Formance + Temporal
+> Total Tasks: 174 atomic tasks across 15 domains
+
+---
+
+## 🚨 CRITICAL: Architectural Changes (2026-01-01)
+
+**PREVIOUS:** Event Horizon + CQRS + Column-based multi-tenancy
+**CURRENT:** Formance Ledger/Wallets + Ory Stack + Schema-per-tenant
+
+### **New Architecture Overview**
+
+**Cell-Based Multi-Tenancy (Shared-Nothing):**
+- Control Plane: Tenant provisioning, routing (NO customer data access)
+- Tenant Plane: Isolated per-tenant silos (dedicated schema, Formance instance, Kratos realm)
+
+**Technology Stack Changes:**
+| Old | New | Why |
+|-----|-----|-----|
+| Event Horizon | Formance Ledger | Purpose-built immutable ledger |
+| Custom Wallets | Formance Wallets | Multi-asset, battle-tested |
+| Custom Auth/JWT | Ory Kratos | MFA, social login, passwordless |
+| Custom RBAC | Ory Keto (ReBAC) | Relationship-based, Google Zanzibar |
+| Custom Gateway | Ory Oathkeeper | Zero-trust, domain routing |
+| tenant_id column | Schema-per-tenant | Physical isolation |
+
+**Critical Directives:**
+1. ✅ Use Formance APIs for ALL wallet operations (NO balance in Postgres)
+2. ✅ Use Ory Kratos UUIDs as FK (NO password storage)
+3. ✅ Use Ory Keto for ALL permissions (two-layer fallback)
+4. ✅ Schema isolation via middleware (SET search_path per request)
+5. ✅ Control Plane NEVER accesses Tenant Plane data
+
+---
+
+## 🎯 Project Overview (Updated)
+
+You are building a **production-grade Cell-Based fintech platform** in Golang with:
+
+- **Identity**: Ory Kratos (tenant-scoped realms)
+- **Authorization**: Ory Keto (ReBAC with relationship tuples)
+- **Gateway**: Ory Oathkeeper (domain-based routing)
+- **Ledger**: Formance Ledger (immutable double-entry log)
+- **Wallets**: Formance Wallets (multi-asset balance management)
+- **Workflows**: Temporal (tenant provisioning, sagas)
+- **Database**: PostgreSQL 16 (schema-per-tenant isolation)
+- **Multi-tenancy**: Strict isolation (Control Plane + Tenant Plane)
+- **Observability**: OpenTelemetry + Prometheus + Jaeger
+
+### Data Hierarchy
+
+```
+Tenant (B2B Customer - The Cell)
+  └─ Account (Logical Container - B2C or B2B)
+      ├─ Wallet 1 (Multi-Asset: USD, EUR, BTC via Formance)
+      ├─ Wallet 2 (Multi-Asset)
+      └─ Users (Members with Ory Keto permissions)
+          ├─ User A (OWNER / ADMIN)
+          ├─ User B (MEMBER)
+          └─ User C (VIEWER)
+```
+
+**Key Principle**: Users and Wallets NEVER directly linked - always through Account.
+
+---
+
 # FinAegis Golang Fintech Platform - Cursor AI Rules
 
 > **Complete development guidelines for building event-sourced, CQRS-based fintech platform in Go**
