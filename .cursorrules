@@ -4,7 +4,7 @@
 >
 > Project: PHP/Laravel → Golang Migration
 > Architecture: Cell-Based (Shared-Nothing) + Hexagonal Architecture + Ory Stack + Formance Stack + Temporal
-> Total Tasks: 183 atomic tasks across 15 phases (Updated 2026-01-02)
+> Total Tasks: 238 atomic tasks across 16 phases (Updated 2026-01-02)
 
 ---
 

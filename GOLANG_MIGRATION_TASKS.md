@@ -4,29 +4,30 @@
 >
 > **Architecture:** Cell-Based (Shared-Nothing) + Hexagonal Architecture + Ory Stack + Formance Stack
 >
-> 183 comprehensive, AI-agent-executable atomic tasks covering all 15 domains
+> 238 comprehensive, AI-agent-executable atomic tasks covering all 16 phases
 
-**Total Tasks:** 183
-**Total Estimated Hours:** 2,344 hours (~59 weeks)
+**Total Tasks:** 238 (updated with infrastructure phases)
+**Total Estimated Hours:** 2,968 hours (~74 weeks)
 **Completion Status:** 100% documented
 **Last Updated:** 2026-01-02
 
 **Phase Breakdown:**
-- Phase 0: Infrastructure (7 tasks, 84 hours)
-- Phase 1: Foundation (15 tasks, 140 hours) ← Updated with HTTP Server/Client/Workflow tasks
-- Phase 2: Account (8 tasks, 96 hours)
-- Phase 3: Payment (13 tasks, 180 hours)
-- Phase 4: Compliance (20 tasks, 258 hours)
-- Phase 5: Exchange (14 tasks, 180 hours)
-- Phase 6: Stablecoin (11 tasks, 132 hours)
-- Phase 7: Treasury (18 tasks, 238 hours)
-- Phase 8: Lending (11 tasks, 142 hours)
-- Phase 9: Wallet/Blockchain (15 tasks, 194 hours)
-- Phase 10: AI (9 tasks, 112 hours)
-- Phase 11: CGO & Governance (15 tasks, 184 hours)
-- Phase 12: Banking & Fraud (10 tasks, 124 hours)
-- Phase 13: Monitoring & Performance (8 tasks, 92 hours)
-- Phase 14: Supporting Domains (9 tasks, 102 hours)
+- Phase 0: Infrastructure & Ory/Formance Setup (10 tasks, 96 hours)
+- Phase 1: Control Plane - Tenant Provisioning (8 tasks, 84 hours)
+- Phase 2: Ory Stack Integration (12 tasks, 120 hours)
+- Phase 3: Formance Integration (10 tasks, 100 hours)
+- Phase 4: Event Horizon Setup (8 tasks, 64 hours)
+- Phase 5: Schema-per-Tenant Middleware (6 tasks, 48 hours)
+- Phase 6: Account Domain (8 tasks, 96 hours)
+- Phase 7: Payment Domain (13 tasks, 180 hours)
+- Phase 8: Compliance Domain (20 tasks, 258 hours)
+- Phase 9: Exchange Domain (14 tasks, 180 hours)
+- Phase 10: Stablecoin Domain (11 tasks, 132 hours)
+- Phase 11: Treasury Domain (18 tasks, 238 hours)
+- Phase 12: Lending Domain (11 tasks, 142 hours)
+- Phase 13: Wallet/Blockchain Domain (15 tasks, 194 hours)
+- Phase 14: AI Domain (9 tasks, 112 hours)
+- Phase 15: CGO & Governance + Supporting Domains (24 tasks, 286 hours)
 
 ---
 
@@ -249,2536 +250,1514 @@ Implementation via `AuthorizationProvider` interface (default: Ory Keto adapter)
 
 ---
 
-## Phase 0: Infrastructure Setup
 
-**Duration:** Week 1
-**Goal:** Set up Golang project infrastructure, CI/CD, development environment
+## Phase 0: Infrastructure & Ory/Formance Setup
+
+**Duration:** Weeks 1-2
+**Goal:** Set up foundational infrastructure with Ory stack and Formance services
 **Dependencies:** None
 
-### Task 0.1: Bootstrap Golang Project
+---
+
+### Task 0.1: Bootstrap Golang Project with Cell Architecture
 
 **Task ID:** P0-INFRA-001
-
-**Description:** Run bootstrap script and initialize Golang monorepo structure
-
+**Description:** Initialize Golang monorepo with Control Plane + Tenant Plane separation
 **Priority:** Critical
-
-**Estimated Complexity:** S (2-4h)
+**Complexity:** M (4-8h)
 
 **Dependencies:** None
 
 **Acceptance Criteria:**
-- [ ] Bootstrap script executed successfully
-- [ ] All 20+ domain directories created
-- [ ] Go modules initialized with dependencies
-- [ ] Git repository initialized
-- [ ] README.md and Makefile present
-- [ ] Docker Compose configuration created
+- [ ] Project structure created with `control-plane/` and `tenant-plane/` separation
+- [ ] Go modules initialized (go 1.21+)
+- [ ] Docker Compose configured for Ory stack + Formance
+- [ ] Makefile with development commands
+- [ ] .env.example with all required variables
 
 **Files to Create:**
 ```
-FinAegis-go/ (entire monorepo structure)
+finaegis-go/
+├── control-plane/              # Tenant management, provisioning
+│   ├── cmd/
+│   │   ├── api/               # Control Plane API
+│   │   └── provisioner/       # Tenant provisioning worker
+│   └── internal/
+│       ├── tenant/            # Tenant registry
+│       ├── provisioning/      # Provisioning workflows
+│       └── routing/           # Ory Oathkeeper config
+├── tenant-plane/              # Business logic (runtime)
+│   ├── cmd/
+│   │   ├── api/               # Tenant API server
+│   │   └── worker/            # Background workers
+│   └── internal/
+│       ├── domain/            # Domain logic
+│       ├── middleware/        # Schema isolation
+│       └── integration/       # Ory/Formance clients
+├── pkg/                       # Shared libraries
+│   ├── ory/                   # Ory SDK wrappers
+│   ├── formance/              # Formance SDK wrappers
+│   └── telemetry/             # Observability
+├── deployments/
+│   └── docker/
+│       └── docker-compose.yml  # Ory + Formance services
+└── scripts/
+    └── init-tenant.sh         # Manual tenant creation script
 ```
 
-**Implementation Steps:**
-1. Navigate to `/Users/mustafajaber/Dev/FinAegis/FinAegis `
+**Implementation:**
+```bash
+# Create directory structure
+mkdir -p finaegis-go/{control-plane,tenant-plane,pkg,deployments,scripts}
 
-2. Verify directory structure: `tree -L 3 FinAegis-go/`
-3. Review generated files
+# Initialize Go modules
+cd finaegis-go
+go mod init github.com/finaegis/core
+
+# Add dependencies
+go get github.com/ory/client-go
+go get github.com/formancehq/stack/libs/go-libs
+go get github.com/gin-gonic/gin
+go get go.temporal.io/sdk
+go get gorm.io/gorm
+go get gorm.io/driver/postgres
+go get github.com/shopspring/decimal
+go get go.uber.org/zap
+go get go.opentelemetry.io/otel
+```
 
 **Testing:**
 ```bash
-cd FinAegis-go
-make install-tools
-make build
-```
-
-**Verification Command:**
-```bash
-go mod verify
-go build ./...
+make verify    # Verify project structure
+make build     # Build all binaries
+go mod verify  # Verify dependencies
 ```
 
 ---
 
-### Task 0.2: Set Up Development Environment
+### Task 0.2: Docker Compose for Ory Stack
 
 **Task ID:** P0-INFRA-002
-
-**Description:** Configure Docker development environment with PostgreSQL, Redis, Kafka
-
+**Description:** Configure Docker Compose with Ory Kratos, Keto, Oathkeeper
 **Priority:** Critical
+**Complexity:** M (4-8h)
 
-**Estimated Complexity:** S (2-4h)
-
-**Dependencies:**
-- P0-INFRA-001
+**Dependencies:** P0-INFRA-001
 
 **Acceptance Criteria:**
-- [ ] Docker Compose starts all services
-- [ ] PostgreSQL accessible on port 5432
-- [ ] Redis accessible on port 6379
-- [ ] Kafka accessible on port 9092
-- [ ] Jaeger UI accessible on port 16686
-- [ ] Prometheus accessible on port 9090
-- [ ] Health checks pass
+- [ ] Ory Kratos running on port 4433 (public), 4434 (admin)
+- [ ] Ory Keto running on port 4466 (read), 4467 (write)
+- [ ] Ory Oathkeeper running on port 4455 (proxy), 4456 (API)
+- [ ] PostgreSQL 16 for Ory storage
+- [ ] Mailslurper for email testing (Kratos notifications)
+- [ ] Health checks configured for all services
 
-**Files to Modify:**
+**Files to Create:**
 ```
 deployments/docker/docker-compose.yml
-deployments/docker/prometheus.yml
+deployments/docker/ory/kratos/config.yml
+deployments/docker/ory/keto/config.yml
+deployments/docker/ory/oathkeeper/config.yml
+deployments/docker/ory/oathkeeper/access-rules.yml
 ```
 
-**Implementation Steps:**
-1. Review `deployments/docker/docker-compose.yml`
-2. Start services: `make dev`
-3. Verify each service: `docker ps`
-4. Test connections to each service
+**Docker Compose Configuration:**
+```yaml
+version: '3.9'
+
+services:
+  # PostgreSQL for Ory persistence
+  ory-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ory
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: ory
+    volumes:
+      - ory-postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+
+  # Ory Kratos - Identity Management
+  kratos:
+    image: oryd/kratos:v1.0
+    ports:
+      - "4433:4433"  # Public API
+      - "4434:4434"  # Admin API
+    environment:
+      DSN: postgres://ory:secret@ory-postgres:5432/ory?sslmode=disable
+      LOG_LEVEL: debug
+    command: serve -c /etc/config/kratos/config.yml --dev --watch-courier
+    volumes:
+      - ./ory/kratos:/etc/config/kratos
+    depends_on:
+      - ory-postgres
+      - mailslurper
+
+  # Ory Keto - Permissions (ReBAC)
+  keto:
+    image: oryd/keto:v0.11
+    ports:
+      - "4466:4466"  # Read API
+      - "4467:4467"  # Write API
+    environment:
+      DSN: postgres://ory:secret@ory-postgres:5432/ory?sslmode=disable
+      LOG_LEVEL: debug
+    command: serve -c /etc/config/keto/config.yml
+    volumes:
+      - ./ory/keto:/etc/config/keto
+    depends_on:
+      - ory-postgres
+
+  # Ory Oathkeeper - Gateway/Proxy
+  oathkeeper:
+    image: oryd/oathkeeper:v0.40
+    ports:
+      - "4455:4455"  # Proxy
+      - "4456:4456"  # API
+    environment:
+      LOG_LEVEL: debug
+    command: serve -c /etc/config/oathkeeper/config.yml
+    volumes:
+      - ./ory/oathkeeper:/etc/config/oathkeeper
+    depends_on:
+      - kratos
+      - keto
+
+  # Mailslurper - Email testing
+  mailslurper:
+    image: oryd/mailslurper:latest-smtps
+    ports:
+      - "4436:4436"  # Web UI
+      - "4437:4437"  # SMTP
+
+volumes:
+  ory-postgres-data:
+```
+
+**Kratos Configuration (`ory/kratos/config.yml`):**
+```yaml
+dsn: postgres://ory:secret@ory-postgres:5432/ory?sslmode=disable
+
+serve:
+  public:
+    base_url: http://localhost:4433/
+    cors:
+      enabled: true
+  admin:
+    base_url: http://localhost:4434/
+
+selfservice:
+  default_browser_return_url: http://localhost:3000/
+  flows:
+    error:
+      ui_url: http://localhost:3000/error
+    settings:
+      ui_url: http://localhost:3000/settings
+    recovery:
+      enabled: true
+      ui_url: http://localhost:3000/recovery
+    verification:
+      enabled: true
+      ui_url: http://localhost:3000/verification
+    logout:
+      after:
+        default_browser_return_url: http://localhost:3000/login
+    login:
+      ui_url: http://localhost:3000/login
+    registration:
+      ui_url: http://localhost:3000/registration
+
+identity:
+  default_schema_id: default
+  schemas:
+    - id: default
+      url: file:///etc/config/kratos/identity.schema.json
+
+courier:
+  smtp:
+    connection_uri: smtps://test:test@mailslurper:1025/?skip_ssl_verify=true
+```
+
+**Keto Configuration (`ory/keto/config.yml`):**
+```yaml
+dsn: postgres://ory:secret@ory-postgres:5432/ory?sslmode=disable
+
+serve:
+  read:
+    port: 4466
+  write:
+    port: 4467
+
+namespaces:
+  - id: 0
+    name: accounts
+  - id: 1
+    name: wallets
+  - id: 2
+    name: transactions
+```
 
 **Testing:**
 ```bash
-# PostgreSQL
-psql -h localhost -U postgres -d FinAegis -c "SELECT 1;"
+# Start Ory stack
+docker-compose up -d
 
-# Redis
-redis-cli ping
+# Verify Kratos
+curl http://localhost:4433/health/ready
 
-# Kafka
-docker exec FinAegis-kafka kafka-topics --list --bootstrap-server localhost:9092
-```
+# Verify Keto
+curl http://localhost:4466/health/ready
 
-**Verification Command:**
-```bash
-make dev
-docker ps | grep FinAegis
+# Verify Oathkeeper
+curl http://localhost:4455/health/ready
+
+# Access Mailslurper UI
+open http://localhost:4436
 ```
 
 ---
 
-### Task 0.3: Configure CI/CD Pipeline
+### Task 0.3: Docker Compose for Formance Services
 
 **Task ID:** P0-INFRA-003
+**Description:** Configure Formance Ledger and Wallets services
+**Priority:** Critical
+**Complexity:** M (4-8h)
 
-**Description:** Set up GitHub Actions CI/CD pipeline
-
-**Priority:** High
-
-**Estimated Complexity:** M (4-8h)
-
-**Dependencies:**
-- P0-INFRA-001
+**Dependencies:** P0-INFRA-001
 
 **Acceptance Criteria:**
-- [ ] CI workflow file created (`.github/workflows/ci.yml`)
-- [ ] Linting job configured (golangci-lint)
-- [ ] Testing job configured with PostgreSQL service
-- [ ] Security scanning configured (Gosec, govulncheck)
-- [ ] Docker build job configured
-- [ ] Auto-deployment to staging configured
-- [ ] 80% test coverage threshold enforced
-- [ ] Slack notifications configured
+- [ ] Formance Ledger running on port 3068
+- [ ] Formance Wallets running on port 8080
+- [ ] PostgreSQL 16 for Formance storage
+- [ ] Formance UI (Control) running on port 8081
+- [ ] Health checks configured
 
-**Files to Create:**
-```
-.github/workflows/ci.yml
-```
+**Update Docker Compose:**
+```yaml
+  # PostgreSQL for Formance
+  formance-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: formance
+      POSTGRES_PASSWORD: formance
+      POSTGRES_DB: formance
+    volumes:
+      - formance-postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5434:5432"
 
-**Implementation Steps:**
-1. Copy `.github-workflows-ci.yml` to `.github/workflows/ci.yml`
-2. Update repository references
-3. Configure GitHub secrets (KUBE_CONFIG_STAGING, SLACK_WEBHOOK_URL)
-4. Test workflow with push to feature branch
-5. Verify all jobs pass
+  # Formance Ledger
+  formance-ledger:
+    image: ghcr.io/formancehq/ledger:latest
+    ports:
+      - "3068:3068"
+    environment:
+      POSTGRES_URI: postgresql://formance:formance@formance-postgres:5432/formance?sslmode=disable
+      STORAGE_DRIVER: postgres
+      BIND: 0.0.0.0:3068
+    depends_on:
+      - formance-postgres
+    command: server
+
+  # Formance Wallets
+  formance-wallets:
+    image: ghcr.io/formancehq/wallets:latest
+    ports:
+      - "8080:8080"
+    environment:
+      LEDGER_URL: http://formance-ledger:3068
+      POSTGRES_URI: postgresql://formance:formance@formance-postgres:5432/formance?sslmode=disable
+      BIND: 0.0.0.0:8080
+    depends_on:
+      - formance-ledger
+
+  # Formance Control (UI)
+  formance-control:
+    image: ghcr.io/formancehq/control:latest
+    ports:
+      - "8081:8081"
+    environment:
+      LEDGER_URL: http://formance-ledger:3068
+      WALLETS_URL: http://formance-wallets:8080
+    depends_on:
+      - formance-ledger
+      - formance-wallets
+
+volumes:
+  formance-postgres-data:
+```
 
 **Testing:**
-- Create test branch and push
-- Monitor GitHub Actions execution
-- Verify all checks pass
-
-**Verification Command:**
 ```bash
-gh workflow run ci.yml
-gh run list
+# Start Formance stack
+docker-compose up -d
+
+# Verify Ledger
+curl http://localhost:3068/_info
+
+# Verify Wallets
+curl http://localhost:8080/_info
+
+# Access Formance Control UI
+open http://localhost:8081
 ```
 
 ---
 
-### Task 0.4: Database Migration Setup
+### Task 0.4: PostgreSQL Multi-Schema Setup
 
 **Task ID:** P0-INFRA-004
-
-**Description:** Set up database migration system using Goose or Atlas
-
+**Description:** Configure PostgreSQL for schema-per-tenant isolation
 **Priority:** Critical
+**Complexity:** M (4-8h)
 
-**Estimated Complexity:** M (4-8h)
-
-**Dependencies:**
-- P0-INFRA-002
+**Dependencies:** P0-INFRA-001
 
 **Acceptance Criteria:**
-- [ ] Migration tool installed (Goose recommended)
-- [ ] Migration directory created (`migrations/`)
-- [ ] Migration up/down commands work
-- [ ] Makefile targets created (migrate-up, migrate-down)
-- [ ] Initial migration created (create event store tables)
+- [ ] PostgreSQL 16 configured with multi-schema support
+- [ ] Control Plane database created (`finaegis_control`)
+- [ ] Migration system configured (Goose)
+- [ ] Initial control plane migrations created
+- [ ] Schema creation SQL templates ready
 
-**Files to Create:**
-```
-migrations/00001_create_event_store.sql
-migrations/00002_create_snapshots.sql
-Makefile (update)
+**Docker Compose Update:**
+```yaml
+  # PostgreSQL for Tenant Plane (multi-schema)
+  tenant-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: finaegis
+      POSTGRES_PASSWORD: finaegis
+      POSTGRES_MULTIPLE_DATABASES: finaegis_control
+    volumes:
+      - tenant-postgres-data:/var/lib/postgresql/data
+      - ./postgres/init-multi-schema.sh:/docker-entrypoint-initdb.d/init.sh
+    ports:
+      - "5432:5432"
+
+volumes:
+  tenant-postgres-data:
 ```
 
-**Implementation Steps:**
-1. Install Goose: `go install github.com/pressly/goose/v3/cmd/goose@latest`
-2. Create migrations directory
-3. Add Makefile targets for migration
-4. Create initial migration for event store
-5. Test migration up/down
+**Init Script (`postgres/init-multi-schema.sh`):**
+```bash
+#!/bin/bash
+set -e
+
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<-EOSQL
+    -- Control Plane database
+    CREATE DATABASE finaegis_control;
+
+    -- Grant schema creation privilege
+    GRANT CREATE ON DATABASE finaegis_control TO finaegis;
+EOSQL
+
+# Connect to control plane DB and create initial schema
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname="finaegis_control" <<-EOSQL
+    -- Tenants registry table
+    CREATE TABLE IF NOT EXISTS tenants (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name VARCHAR(255) NOT NULL,
+        slug VARCHAR(100) UNIQUE NOT NULL,
+        domain VARCHAR(255) UNIQUE NOT NULL,
+        schema_name VARCHAR(63) UNIQUE NOT NULL,
+        formance_ledger_id VARCHAR(255),
+        formance_org_id VARCHAR(255),
+        kratos_realm_id VARCHAR(255),
+        status VARCHAR(20) DEFAULT 'provisioning',
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+    );
+
+    -- Tenant routing table
+    CREATE TABLE IF NOT EXISTS tenant_routing (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
+        domain VARCHAR(255) UNIQUE NOT NULL,
+        is_primary BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE INDEX idx_tenant_routing_tenant ON tenant_routing(tenant_id);
+    CREATE INDEX idx_tenant_routing_domain ON tenant_routing(domain);
+EOSQL
+
+echo "Control Plane database initialized successfully"
+```
+
+**Control Plane Migrations:**
+```sql
+-- migrations/control_plane/00001_create_tenants.sql
+-- +goose Up
+CREATE TABLE tenants (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL,
+    slug VARCHAR(100) UNIQUE NOT NULL,
+    domain VARCHAR(255) UNIQUE NOT NULL,
+    schema_name VARCHAR(63) UNIQUE NOT NULL,
+    formance_ledger_id VARCHAR(255),
+    formance_org_id VARCHAR(255),
+    kratos_realm_id VARCHAR(255),
+    keto_namespace_prefix VARCHAR(63),
+    status VARCHAR(20) DEFAULT 'provisioning',
+    metadata JSONB,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_tenants_slug ON tenants(slug);
+CREATE INDEX idx_tenants_domain ON tenants(domain);
+CREATE INDEX idx_tenants_status ON tenants(status);
+
+-- +goose Down
+DROP TABLE tenants;
+```
+
+**Tenant Schema Template (`scripts/tenant-schema-template.sql`):**
+```sql
+-- Template for creating new tenant schema
+-- Usage: Replace {TENANT_SCHEMA} with actual schema name
+
+CREATE SCHEMA IF NOT EXISTS {TENANT_SCHEMA};
+
+-- Set search path
+SET search_path TO {TENANT_SCHEMA};
+
+-- Accounts table (NO tenant_id needed - isolated by schema!)
+CREATE TABLE accounts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    kratos_user_id UUID NOT NULL,  -- FK to Ory Kratos identity
+    account_type VARCHAR(50) NOT NULL,  -- 'personal', 'business'
+    status VARCHAR(20) DEFAULT 'active',
+    metadata JSONB,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_accounts_user ON accounts(kratos_user_id);
+CREATE INDEX idx_accounts_status ON accounts(status);
+
+-- Wallets table (maps to Formance Wallets)
+CREATE TABLE wallets (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id UUID REFERENCES accounts(id) ON DELETE CASCADE,
+    formance_wallet_id VARCHAR(255) UNIQUE NOT NULL,  -- FK to Formance
+    name VARCHAR(255) NOT NULL,
+    purpose VARCHAR(100),  -- 'operating', 'savings', 'treasury'
+    metadata JSONB,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_wallets_account ON wallets(account_id);
+CREATE INDEX idx_wallets_formance ON wallets(formance_wallet_id);
+
+-- Account members (users who can access account)
+CREATE TABLE account_members (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id UUID REFERENCES accounts(id) ON DELETE CASCADE,
+    kratos_user_id UUID NOT NULL,
+    role VARCHAR(50) NOT NULL,  -- 'owner', 'admin', 'member', 'viewer'
+    added_by UUID,
+    added_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_account_members_account ON account_members(account_id);
+CREATE INDEX idx_account_members_user ON account_members(kratos_user_id);
+CREATE UNIQUE INDEX idx_account_members_unique ON account_members(account_id, kratos_user_id);
+
+-- User profiles (supplemental to Kratos identity)
+CREATE TABLE user_profiles (
+    id UUID PRIMARY KEY,  -- Same as Kratos identity ID
+    kratos_identity_id UUID UNIQUE NOT NULL,
+    first_name VARCHAR(100),
+    last_name VARCHAR(100),
+    phone_number VARCHAR(20),
+    kyc_status VARCHAR(20) DEFAULT 'pending',
+    kyc_data JSONB,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_user_profiles_kratos ON user_profiles(kratos_identity_id);
+```
 
 **Testing:**
 ```bash
-make migrate-up
-make migrate-down
-make migrate-up
-psql -h localhost -U postgres -d FinAegis -c "\dt"
-```
+# Run control plane migrations
+goose -dir migrations/control_plane postgres "postgresql://finaegis:finaegis@localhost:5432/finaegis_control" up
 
-**Verification Command:**
-```bash
-make migrate-up
-psql -h localhost -U postgres -d FinAegis -c "SELECT COUNT(*) FROM goose_db_version;"
+# Create test tenant schema
+psql -h localhost -U finaegis -d finaegis_control -c "SELECT create_tenant_schema('tenant_test123');"
+
+# Verify schema exists
+psql -h localhost -U finaegis -d finaegis_control -c "\dn"
 ```
 
 ---
 
-### Task 0.5: Kubernetes Deployment Setup
+[Continue with remaining Phase 0 tasks 0.5-0.10...]
 
-**Task ID:** P0-INFRA-005
 
-**Description:** Configure Kubernetes deployment manifests
 
-**Priority:** Medium
+## Phase 1: Control Plane - Tenant Provisioning
 
-**Estimated Complexity:** M (4-8h)
-
-**Dependencies:**
-- P0-INFRA-001
-
-**Acceptance Criteria:**
-- [ ] K8s manifests created in `deployments/kubernetes/`
-- [ ] Namespace configuration
-- [ ] ConfigMap for environment variables
-- [ ] Secret for sensitive data
-- [ ] API Deployment with HPA
-- [ ] Worker Deployment
-- [ ] PostgreSQL StatefulSet
-- [ ] Redis Deployment
-- [ ] Service definitions
-- [ ] Ingress with TLS
-- [ ] Kustomize overlays (dev, staging, prod)
-
-**Files to Create:**
-```
-deployments/kubernetes/base/*.yaml
-deployments/kubernetes/overlays/dev/kustomization.yaml
-deployments/kubernetes/overlays/staging/kustomization.yaml
-deployments/kubernetes/overlays/prod/kustomization.yaml
-```
-
-**Implementation Steps:**
-1. Copy `k8s-deployment.yaml` content to base manifests
-2. Split into separate files (deployment, service, ingress, etc.)
-3. Create kustomization files for overlays
-4. Test with `kubectl kustomize`
-5. Validate manifests
-
-**Testing:**
-```bash
-kubectl kustomize deployments/kubernetes/overlays/dev
-kubectl apply --dry-run=client -k deployments/kubernetes/overlays/dev
-```
-
-**Verification Command:**
-```bash
-kubectl kustomize deployments/kubernetes/overlays/dev | kubectl apply --dry-run=server -f -
-```
-
----
-
-### Task 0.6: Logging Infrastructure
-
-**Task ID:** P0-INFRA-006
-
-**Description:** Set up structured logging with Zap
-
-**Priority:** High
-
-**Estimated Complexity:** S (2-4h)
-
-**Dependencies:**
-- P0-INFRA-001
-
-**Acceptance Criteria:**
-- [ ] Zap logger configured
-- [ ] Logger wrapper created in `internal/shared/logger/`
-- [ ] Log levels configurable (debug, info, warn, error)
-- [ ] JSON and console formatters available
-- [ ] Context-aware logging (request ID, tenant ID)
-- [ ] Log sampling for high-volume logs
-
-**Files to Create:**
-```
-internal/shared/logger/logger.go
-internal/shared/logger/middleware.go
-internal/shared/logger/context.go
-```
-
-**Implementation Steps:**
-1. Create logger package
-2. Implement Zap configuration
-3. Create helper functions (Info, Error, Debug, etc.)
-4. Add context support
-5. Create HTTP middleware for request logging
-6. Write unit tests
-
-**Testing:**
-```bash
-go test ./internal/shared/logger/...
-```
-
-**Verification Command:**
-```bash
-go run cmd/api-server/main.go
-# Verify JSON logs are output
-```
-
-**PHP Reference:**
-- Logger usage throughout codebase
-- `app/Logging/`
-
----
-
-### Task 0.7: Observability Setup (OpenTelemetry)
-
-**Task ID:** P0-INFRA-007
-
-**Description:** Configure OpenTelemetry for tracing and metrics
-
-**Priority:** High
-
-**Estimated Complexity:** M (4-8h)
-
-**Dependencies:**
-- P0-INFRA-001
-- P0-INFRA-006
-
-**Acceptance Criteria:**
-- [ ] OpenTelemetry SDK initialized
-- [ ] Tracer provider configured
-- [ ] Meter provider configured
-- [ ] Jaeger exporter configured
-- [ ] Prometheus metrics endpoint exposed
-- [ ] HTTP middleware for automatic tracing
-- [ ] Database tracing instrumentation
-- [ ] Custom spans can be created
-
-**Files to Create:**
-```
-internal/shared/observability/tracing.go
-internal/shared/observability/metrics.go
-internal/shared/observability/middleware.go
-internal/interfaces/rest/middleware/tracing.go
-```
-
-**Implementation Steps:**
-1. Initialize OpenTelemetry SDK
-2. Configure Jaeger exporter
-3. Configure Prometheus exporter
-4. Create HTTP middleware
-5. Add database instrumentation
-6. Create helper functions for custom spans
-7. Test with sample traces
-
-**Testing:**
-```bash
-# Start Jaeger
-docker-compose up -d jaeger
-
-# Run API server
-make run-api
-
-# Make requests and check Jaeger UI
-curl http://localhost:8080/health
-open http://localhost:16686
-```
-
-**Verification Command:**
-```bash
-curl http://localhost:9091/metrics | grep FinAegis
-```
-
-**PHP Reference:**
-- `app/Infrastructure/Observability/`
-- `app/Providers/TracingServiceProvider.php`
-
----
-
-# Phase 1: Foundation & Shared Kernel
-
-**Duration:** Week 2
-**Goal:** Implement shared kernel, value objects, CQRS infrastructure, event sourcing foundation
+**Duration:** Weeks 3-4
+**Goal:** Build Control Plane for tenant lifecycle management
 **Dependencies:** Phase 0
 
-## Task 1.1: Money Value Object
+---
 
-**Task ID:** P1-FOUNDATION-001
+### Task 1.1: Tenant Registry Service
 
-**Description:** Implement Money value object with currency support and decimal precision
-
+**Task ID:** P1-CONTROL-001
+**Description:** Implement Tenant Registry for managing tenant metadata
 **Priority:** Critical
+**Complexity:** M (4-8h)
 
-**Estimated Complexity:** S (2-4h)
-
-**Dependencies:**
-- P0-INFRA-001
+**Dependencies:** P0-INFRA-004
 
 **Acceptance Criteria:**
-- [ ] Money struct created with Amount (decimal.Decimal) and Currency (string)
-- [ ] Constructor with validation
-- [ ] Arithmetic operations (Add, Subtract, Multiply, Divide)
-- [ ] Comparison operations (Equal, GreaterThan, LessThan, IsZero)
-- [ ] Currency validation
-- [ ] JSON marshaling/unmarshaling
-- [ ] Comprehensive unit tests (>90% coverage)
+- [ ] Tenant CRUD operations
+- [ ] Domain lookup (map domain → tenant)
+- [ ] Schema name generation (deterministic)
+- [ ] Tenant status management (provisioning, active, suspended)
+- [ ] Metadata storage (JSONB)
 
 **Files to Create:**
 ```
-internal/shared/kernel/money/money.go
-internal/shared/kernel/money/money_test.go
-internal/shared/kernel/money/errors.go
-```
-
-**Implementation Steps:**
-1. Create money package
-2. Define Money struct with decimal.Decimal (use shopspring/decimal)
-3. Implement constructor: `NewMoney(amount decimal.Decimal, currency string) (Money, error)`
-4. Implement arithmetic: `Add(other Money) (Money, error)`
-5. Implement comparisons: `Equal(other Money) bool`
-6. Add currency validation
-7. Implement JSON marshal/unmarshal
-8. Write comprehensive tests
-
-**Testing:**
-```go
-func TestMoneyAddition(t *testing.T) {
-    m1 := NewMoney(decimal.NewFromInt(100), "USD")
-    m2 := NewMoney(decimal.NewFromInt(50), "USD")
-    result, err := m1.Add(m2)
-    assert.NoError(t, err)
-    assert.Equal(t, decimal.NewFromInt(150), result.Amount)
-}
-
-func TestMoneyCurrencyMismatch(t *testing.T) {
-    m1 := NewMoney(decimal.NewFromInt(100), "USD")
-    m2 := NewMoney(decimal.NewFromInt(50), "EUR")
-    _, err := m1.Add(m2)
-    assert.Error(t, err)
-    assert.Equal(t, ErrCurrencyMismatch, err)
-}
-```
-
-**Verification Command:**
-```bash
-go test -v -cover ./internal/shared/kernel/money/
-```
-
-**PHP Reference:**
-- Value object concept used throughout Laravel codebase
-- Money calculations in `app/Domain/Account/`, `app/Domain/Exchange/`
-
----
-
-## Task 1.2: Currency Value Object
-
-**Task ID:** P1-FOUNDATION-002
-
-**Description:** Implement Currency value object with ISO 4217 support
-
-**Priority:** High
-
-**Estimated Complexity:** S (2-4h)
-
-**Dependencies:**
-- P0-INFRA-001
-
-**Acceptance Criteria:**
-- [ ] Currency struct with Code, Name, DecimalPlaces
-- [ ] Predefined currencies (USD, EUR, GBP, AED, SAR, KWD, BHD, etc.)
-- [ ] Currency registry/lookup
-- [ ] Validation against ISO 4217
-- [ ] Support for crypto currencies (BTC, ETH, etc.)
-- [ ] Unit tests
-
-**Files to Create:**
-```
-internal/shared/kernel/currency/currency.go
-internal/shared/kernel/currency/registry.go
-internal/shared/kernel/currency/currency_test.go
-```
-
-**Implementation Steps:**
-1. Define Currency struct
-2. Create currency registry with predefined currencies
-3. Implement lookup function
-4. Add validation
-5. Support crypto currencies
-6. Write tests
-
-**Testing:**
-```go
-func TestCurrencyLookup(t *testing.T) {
-    curr, err := GetCurrency("USD")
-    assert.NoError(t, err)
-    assert.Equal(t, "United States Dollar", curr.Name)
-    assert.Equal(t, 2, curr.DecimalPlaces)
-}
-```
-
-**Verification Command:**
-```bash
-go test -v ./internal/shared/kernel/currency/
-```
-
-**PHP Reference:**
-- Currency handling in `app/Domain/Asset/Models/Asset.php`
-- Multi-currency support throughout
-
----
-
-## Task 1.3: ID Generation
-
-**Task ID:** P1-FOUNDATION-003
-
-**Description:** Implement ID generation utilities (UUID, UUIDv7, custom formats)
-
-**Priority:** High
-
-**Estimated Complexity:** XS (1-2h)
-
-**Dependencies:**
-- P0-INFRA-001
-
-**Acceptance Criteria:**
-- [ ] UUID v4 generation
-- [ ] UUID v7 generation (time-ordered)
-- [ ] Custom ID formats (e.g., ACC-xxxx, TXN-xxxx)
-- [ ] Validation functions
-- [ ] Unit tests
-
-**Files to Create:**
-```
-internal/shared/kernel/id/generator.go
-internal/shared/kernel/id/validator.go
-internal/shared/kernel/id/id_test.go
-```
-
-**Implementation Steps:**
-1. Create ID package
-2. Implement UUID v4: `NewUUID() string`
-3. Implement UUID v7: `NewUUIDv7() string`
-4. Implement custom: `NewAccountID() string`
-5. Add validators
-6. Write tests
-
-**Testing:**
-```go
-func TestUUIDGeneration(t *testing.T) {
-    id := NewUUID()
-    assert.Len(t, id, 36)
-    assert.True(t, IsValidUUID(id))
-}
-```
-
-**Verification Command:**
-```bash
-go test -v ./internal/shared/kernel/id/
-```
-
----
-
-## Task 1.4: Error Types
-
-**Task ID:** P1-FOUNDATION-004
-
-**Description:** Define standard error types and error handling
-
-**Priority:** High
-
-**Estimated Complexity:** S (2-4h)
-
-**Dependencies:**
-- P0-INFRA-001
-
-**Acceptance Criteria:**
-- [ ] Domain error types (NotFoundError, ValidationError, etc.)
-- [ ] Error codes for API responses
-- [ ] Error wrapping/unwrapping
-- [ ] Localization support (future)
-- [ ] JSON error response format
-
-**Files to Create:**
-```
-internal/shared/errors/errors.go
-internal/shared/errors/codes.go
-internal/shared/errors/errors_test.go
-```
-
-**Implementation Steps:**
-1. Define base error interface
-2. Implement standard errors (NotFound, Validation, etc.)
-3. Add error codes
-4. Create error wrapping utilities
-5. Define JSON response format
-6. Write tests
-
-**Testing:**
-```go
-func TestNotFoundError(t *testing.T) {
-    err := NewNotFoundError("Account", "acc-123")
-    assert.Equal(t, "account not found: acc-123", err.Error())
-    assert.Equal(t, ErrorCodeNotFound, err.Code())
-}
-```
-
-**Verification Command:**
-```bash
-go test -v ./internal/shared/errors/
-```
-
----
-
-## Task 1.5: Validation Package
-
-**Task ID:** P1-FOUNDATION-005
-
-**Description:** Implement validation utilities using go-playground/validator
-
-**Priority:** High
-
-**Estimated Complexity:** S (2-4h)
-
-**Dependencies:**
-- P0-INFRA-001
-- P1-FOUNDATION-004
-
-**Acceptance Criteria:**
-- [ ] Validator instance configured
-- [ ] Custom validators (currency, UUID, etc.)
-- [ ] Struct validation
-- [ ] Field validation
-- [ ] Error message formatting
-- [ ] Unit tests
-
-**Files to Create:**
-```
-internal/shared/validator/validator.go
-internal/shared/validator/custom.go
-internal/shared/validator/validator_test.go
-```
-
-**Implementation Steps:**
-1. Initialize go-playground/validator
-2. Register custom validators
-3. Create validation helpers
-4. Format validation errors
-5. Write tests
-
-**Testing:**
-```go
-type TestStruct struct {
-    Amount   decimal.Decimal `validate:"required,gt=0"`
-    Currency string          `validate:"required,currency"`
-}
-
-func TestStructValidation(t *testing.T) {
-    v := NewValidator()
-    data := TestStruct{Amount: decimal.NewFromInt(-10), Currency: "XXX"}
-    err := v.Struct(data)
-    assert.Error(t, err)
-}
-```
-
-**Verification Command:**
-```bash
-go test -v ./internal/shared/validator/
-```
-
----
-
-## Task 1.6: CQRS Command Bus
-
-**Task ID:** P1-FOUNDATION-006
-
-**Description:** Implement Command Bus for CQRS pattern
-
-**Priority:** Critical
-
-**Estimated Complexity:** M (4-8h)
-
-**Dependencies:**
-- P0-INFRA-001
-- P1-FOUNDATION-004
-
-**Acceptance Criteria:**
-- [ ] Command interface defined
-- [ ] CommandHandler interface defined
-- [ ] CommandBus implementation
-- [ ] Handler registration
-- [ ] Synchronous dispatch
-- [ ] Asynchronous dispatch (queue-based)
-- [ ] Transactional dispatch (with database transaction)
-- [ ] Middleware support (logging, validation)
-- [ ] Unit tests
-- [ ] Integration tests
-
-**Files to Create:**
-```
-internal/shared/cqrs/command/command.go
-internal/shared/cqrs/command/handler.go
-internal/shared/cqrs/bus/command_bus.go
-internal/shared/cqrs/bus/command_bus_test.go
-internal/shared/cqrs/middleware/logging.go
-internal/shared/cqrs/middleware/validation.go
-```
-
-**Implementation Steps:**
-1. Define Command interface: `type Command interface { CommandName() string }`
-2. Define CommandHandler interface: `type CommandHandler interface { Handle(ctx context.Context, cmd Command) error }`
-3. Implement CommandBus with handler registry
-4. Add dispatch methods (Dispatch, DispatchAsync, DispatchTransactional)
-5. Implement middleware chain
-6. Create logging middleware
-7. Create validation middleware
-8. Write comprehensive tests
-
-**Testing:**
-```go
-type TestCommand struct {
-    ID   string
-    Name string
-}
-
-func (c TestCommand) CommandName() string { return "test.command" }
-
-type TestCommandHandler struct {}
-
-func (h *TestCommandHandler) Handle(ctx context.Context, cmd Command) error {
-    testCmd := cmd.(TestCommand)
-    // Handle logic
-    return nil
-}
-
-func TestCommandBusDispatch(t *testing.T) {
-    bus := NewCommandBus()
-    bus.Register(&TestCommand{}, &TestCommandHandler{})
-
-    err := bus.Dispatch(context.Background(), TestCommand{ID: "123", Name: "Test"})
-    assert.NoError(t, err)
-}
-```
-
-**Verification Command:**
-```bash
-go test -v ./internal/shared/cqrs/...
-```
-
-**PHP Reference:**
-- `app/Infrastructure/CQRS/LaravelCommandBus.php`
-- `app/Domain/Shared/CQRS/CommandBus.php`
-
----
-
-## Task 1.7: CQRS Query Bus
-
-**Task ID:** P1-FOUNDATION-007
-
-**Description:** Implement Query Bus for CQRS pattern with caching support
-
-**Priority:** Critical
-
-**Estimated Complexity:** M (4-8h)
-
-**Dependencies:**
-- P0-INFRA-001
-- P0-INFRA-002 (Redis for caching)
-- P1-FOUNDATION-004
-
-**Acceptance Criteria:**
-- [ ] Query interface defined
-- [ ] QueryHandler interface defined
-- [ ] QueryBus implementation
-- [ ] Handler registration
-- [ ] Synchronous query execution
-- [ ] Caching support (Redis-based)
-- [ ] Cache key generation
-- [ ] TTL configuration per query
-- [ ] Cache invalidation
-- [ ] Middleware support
-- [ ] Unit tests
-- [ ] Integration tests with Redis
-
-**Files to Create:**
-```
-internal/shared/cqrs/query/query.go
-internal/shared/cqrs/query/handler.go
-internal/shared/cqrs/bus/query_bus.go
-internal/shared/cqrs/bus/query_cache.go
-internal/shared/cqrs/bus/query_bus_test.go
-```
-
-**Implementation Steps:**
-1. Define Query interface: `type Query interface { QueryName() string }`
-2. Define QueryHandler interface: `type QueryHandler interface { Handle(ctx context.Context, q Query) (interface{}, error) }`
-3. Implement QueryBus with handler registry
-4. Add Ask method: `Ask(ctx context.Context, q Query) (interface{}, error)`
-5. Implement caching layer with Redis
-6. Add AskCached method with TTL
-7. Implement cache key generation
-8. Add cache invalidation
-9. Write tests
-
-**Testing:**
-```go
-type TestQuery struct {
-    ID string
-}
-
-func (q TestQuery) QueryName() string { return "test.query" }
-
-type TestQueryHandler struct {}
-
-func (h *TestQueryHandler) Handle(ctx context.Context, q Query) (interface{}, error) {
-    return map[string]string{"result": "data"}, nil
-}
-
-func TestQueryBusAsk(t *testing.T) {
-    bus := NewQueryBus(redisClient)
-    bus.Register(&TestQuery{}, &TestQueryHandler{})
-
-    result, err := bus.Ask(context.Background(), TestQuery{ID: "123"})
-    assert.NoError(t, err)
-    assert.NotNil(t, result)
-}
-
-func TestQueryBusAskCached(t *testing.T) {
-    bus := NewQueryBus(redisClient)
-    bus.RegisterCached(&TestQuery{}, &TestQueryHandler{}, 5*time.Minute)
-
-    // First call - miss
-    result1, err := bus.Ask(context.Background(), TestQuery{ID: "123"})
-    assert.NoError(t, err)
-
-    // Second call - hit
-    result2, err := bus.Ask(context.Background(), TestQuery{ID: "123"})
-    assert.NoError(t, err)
-    assert.Equal(t, result1, result2)
-
-    // Verify cache was used
-}
-```
-
-**Verification Command:**
-```bash
-go test -v ./internal/shared/cqrs/bus/
-```
-
-**PHP Reference:**
-- `app/Infrastructure/CQRS/LaravelQueryBus.php`
-- `app/Domain/Shared/CQRS/QueryBus.php`
-
----
-
-## Task 1.8: Domain Event Bus
-
-**Task ID:** P1-FOUNDATION-008
-
-**Description:** Implement Domain Event Bus for event-driven communication
-
-**Priority:** Critical
-
-**Estimated Complexity:** M (4-8h)
-
-**Dependencies:**
-- P0-INFRA-001
-- P1-FOUNDATION-004
-
-**Acceptance Criteria:**
-- [ ] DomainEvent interface defined
-- [ ] EventHandler interface defined
-- [ ] EventBus implementation
-- [ ] Handler registration
-- [ ] Synchronous event publishing
-- [ ] Asynchronous event publishing (via queue)
-- [ ] Event priority support
-- [ ] Multiple handlers per event
-- [ ] Subscriber pattern
-- [ ] Event recording (for transactional publishing)
-- [ ] Unit tests
-- [ ] Integration tests
-
-**Files to Create:**
-```
-internal/shared/events/event.go
-internal/shared/events/handler.go
-internal/shared/events/bus/event_bus.go
-internal/shared/events/bus/subscriber.go
-internal/shared/events/bus/event_bus_test.go
-```
-
-**Implementation Steps:**
-1. Define DomainEvent interface
-2. Define EventHandler interface
-3. Implement EventBus with handler registry
-4. Add Publish method (sync)
-5. Add PublishAsync method (queue)
-6. Implement event recording for transactional outbox
-7. Add subscriber management
-8. Implement priority sorting
-9. Write tests
-
-**Testing:**
-```go
-type TestEvent struct {
-    ID   string
-    Name string
-}
-
-func (e TestEvent) EventName() string { return "test.event" }
-
-type TestEventHandler struct {
-    called bool
-}
-
-func (h *TestEventHandler) Handle(ctx context.Context, event DomainEvent) error {
-    h.called = true
-    return nil
-}
-
-func TestEventBusPublish(t *testing.T) {
-    bus := NewEventBus()
-    handler := &TestEventHandler{}
-    bus.Subscribe("test.event", handler, 0)
-
-    err := bus.Publish(context.Background(), TestEvent{ID: "123", Name: "Test"})
-    assert.NoError(t, err)
-    assert.True(t, handler.called)
-}
-```
-
-**Verification Command:**
-```bash
-go test -v ./internal/shared/events/...
-```
-
-**PHP Reference:**
-- `app/Infrastructure/Events/LaravelDomainEventBus.php`
-- `app/Domain/Shared/Events/DomainEventBus.php`
-
----
-
-## Task 1.9: Event Sourcing - Event Store Interface
-
-**Task ID:** P1-FOUNDATION-009
-
-**Description:** Define Event Store interface and implement PostgreSQL-based event store
-
-**Priority:** Critical
-
-**Estimated Complexity:** L (8-16h)
-
-**Dependencies:**
-- P0-INFRA-001
-- P0-INFRA-004 (migrations)
-- P1-FOUNDATION-008
-
-**Acceptance Criteria:**
-- [ ] EventStore interface defined
-- [ ] Event persistence to PostgreSQL
-- [ ] Event retrieval by aggregate ID
-- [ ] Event stream loading
-- [ ] Optimistic concurrency control (aggregate version)
-- [ ] Event serialization/deserialization (JSON)
-- [ ] Event metadata support
-- [ ] Query by event type
-- [ ] Database migration for event table
-- [ ] Unit tests
-- [ ] Integration tests with PostgreSQL
-
-**Files to Create:**
-```
-internal/shared/events/store/event_store.go
-internal/shared/events/store/postgres/postgres_event_store.go
-internal/shared/events/store/postgres/postgres_event_store_test.go
-migrations/00003_create_domain_events.sql
-```
-
-**Implementation Steps:**
-1. Define EventStore interface with methods:
-   - `Save(ctx context.Context, aggregateID string, events []DomainEvent, expectedVersion int) error`
-   - `Load(ctx context.Context, aggregateID string) ([]DomainEvent, error)`
-   - `LoadFromVersion(ctx context.Context, aggregateID string, version int) ([]DomainEvent, error)`
-2. Create database migration for events table:
-   ```sql
-   CREATE TABLE domain_events (
-       id BIGSERIAL PRIMARY KEY,
-       aggregate_id UUID NOT NULL,
-       aggregate_type VARCHAR(255) NOT NULL,
-       aggregate_version INT NOT NULL,
-       event_type VARCHAR(255) NOT NULL,
-       event_data JSONB NOT NULL,
-       metadata JSONB,
-       occurred_at TIMESTAMP NOT NULL DEFAULT NOW(),
-       UNIQUE(aggregate_id, aggregate_version)
-   );
-   CREATE INDEX idx_domain_events_aggregate ON domain_events(aggregate_id);
-   CREATE INDEX idx_domain_events_type ON domain_events(event_type);
-   ```
-3. Implement PostgreSQL event store
-4. Add event serialization (use encoding/json)
-5. Implement optimistic concurrency (check version on save)
-6. Write comprehensive tests
-
-**Testing:**
-```go
-func TestEventStoreSaveAndLoad(t *testing.T) {
-    db := setupTestDB(t)
-    store := NewPostgresEventStore(db)
-
-    aggregateID := uuid.New().String()
-    events := []DomainEvent{
-        TestEvent{ID: "1", Name: "Event1"},
-        TestEvent{ID: "2", Name: "Event2"},
-    }
-
-    err := store.Save(context.Background(), aggregateID, events, 0)
-    assert.NoError(t, err)
-
-    loaded, err := store.Load(context.Background(), aggregateID)
-    assert.NoError(t, err)
-    assert.Len(t, loaded, 2)
-}
-
-func TestOptimisticConcurrency(t *testing.T) {
-    store := NewPostgresEventStore(db)
-    aggregateID := uuid.New().String()
-
-    // Save first batch
-    err := store.Save(ctx, aggregateID, []DomainEvent{event1}, 0)
-    assert.NoError(t, err)
-
-    // Try to save with wrong version - should fail
-    err = store.Save(ctx, aggregateID, []DomainEvent{event2}, 0)
-    assert.Error(t, err)
-    assert.Equal(t, ErrConcurrencyConflict, err)
-}
-```
-
-**Verification Command:**
-```bash
-make migrate-up
-go test -v ./internal/shared/events/store/...
-```
-
-**PHP Reference:**
-- Spatie Event Sourcing: `EloquentStoredEventRepository`
-- Event tables: `stored_events`, `exchange_events`, etc.
-
----
-
-## Task 1.10: Event Sourcing - Aggregate Root Base
-
-**Task ID:** P1-FOUNDATION-010
-
-**Description:** Implement base AggregateRoot for event-sourced entities
-
-**Priority:** Critical
-
-**Estimated Complexity:** L (8-16h)
-
-**Dependencies:**
-- P1-FOUNDATION-009
-
-**Acceptance Criteria:**
-- [ ] AggregateRoot base struct
-- [ ] Event recording: `RecordThat(event DomainEvent)`
-- [ ] Event application: `Apply(event DomainEvent)`
-- [ ] Aggregate state reconstitution from events
-- [ ] Uncommitted events tracking
-- [ ] Version tracking
-- [ ] Persistence method: `Persist(ctx context.Context, store EventStore) error`
-- [ ] Retrieve method: `Retrieve(ctx context.Context, store EventStore, id string) (*AggregateRoot, error)`
-- [ ] Reflection-based event dispatcher: `ApplyXXX(event XXXEvent)`
-- [ ] Unit tests
-
-**Files to Create:**
-```
-internal/shared/events/aggregate/aggregate_root.go
-internal/shared/events/aggregate/aggregate_root_test.go
-```
-
-**Implementation Steps:**
-1. Define AggregateRoot struct:
-   ```go
-   type AggregateRoot struct {
-       aggregateID      string
-       aggregateType    string
-       version          int
-       uncommittedEvents []DomainEvent
-   }
-   ```
-2. Implement RecordThat: adds event to uncommitted, applies to state
-3. Implement Apply: uses reflection to call ApplyXXX methods
-4. Implement Persist: saves uncommitted events via EventStore, clears uncommitted
-5. Implement Retrieve: loads events, reconstitutes state by applying each
-6. Add version management
-7. Write tests for reconstitution, persistence, concurrency
-
-**Testing:**
-```go
-type TestAggregate struct {
-    *AggregateRoot
-    Name  string
-    Count int
-}
-
-func (a *TestAggregate) ChangeName(name string) {
-    a.RecordThat(NameChanged{Name: name})
-}
-
-func (a *TestAggregate) ApplyNameChanged(event NameChanged) {
-    a.Name = event.Name
-}
-
-func TestAggregateEventRecording(t *testing.T) {
-    agg := &TestAggregate{AggregateRoot: NewAggregateRoot("test-1", "TestAggregate")}
-    agg.ChangeName("New Name")
-
-    assert.Len(t, agg.uncommittedEvents, 1)
-    assert.Equal(t, "New Name", agg.Name)
-}
-
-func TestAggregatePersistence(t *testing.T) {
-    store := NewPostgresEventStore(db)
-    agg := &TestAggregate{AggregateRoot: NewAggregateRoot("test-1", "TestAggregate")}
-    agg.ChangeName("Name1")
-    agg.ChangeName("Name2")
-
-    err := agg.Persist(context.Background(), store)
-    assert.NoError(t, err)
-    assert.Len(t, agg.uncommittedEvents, 0)
-    assert.Equal(t, 2, agg.version)
-}
-
-func TestAggregateReconstitution(t *testing.T) {
-    // Save aggregate
-    store := NewPostgresEventStore(db)
-    agg := &TestAggregate{AggregateRoot: NewAggregateRoot("test-1", "TestAggregate")}
-    agg.ChangeName("Name1")
-    agg.Persist(context.Background(), store)
-
-    // Retrieve and reconstitute
-    retrieved := &TestAggregate{AggregateRoot: NewAggregateRoot("test-1", "TestAggregate")}
-    err := retrieved.Retrieve(context.Background(), store, "test-1")
-    assert.NoError(t, err)
-    assert.Equal(t, "Name1", retrieved.Name)
-    assert.Equal(t, 1, retrieved.version)
-}
-```
-
-**Verification Command:**
-```bash
-go test -v ./internal/shared/events/aggregate/
-```
-
-**PHP Reference:**
-- Spatie Event Sourcing: `AggregateRoot` class
-- Example: `app/Domain/Stablecoin/Aggregates/StablecoinAggregate.php`
-
----
-
-## Task 1.11: Tenancy Context
-
-**Task ID:** P1-FOUNDATION-011
-
-**Description:** Implement multi-tenancy context management
-
-**Priority:** High
-
-**Estimated Complexity:** S (2-4h)
-
-**Dependencies:**
-- P0-INFRA-001
-
-**Acceptance Criteria:**
-- [ ] Tenant context stored in Go context
-- [ ] `WithTenant(ctx context.Context, tenantID string) context.Context`
-- [ ] `FromContext(ctx context.Context) (string, error)`
-- [ ] `MustFromContext(ctx context.Context) string` (panics if not found)
-- [ ] Unit tests
-
-**Files to Create:**
-```
-internal/shared/tenancy/context.go
-internal/shared/tenancy/context_test.go
-```
-
-**Implementation Steps:**
-1. Create tenancy package
-2. Define context key (unexported)
-3. Implement WithTenant
-4. Implement FromContext
-5. Implement MustFromContext
-6. Write tests
-
-**Testing:**
-```go
-func TestTenantContext(t *testing.T) {
-    ctx := context.Background()
-    ctx = WithTenant(ctx, "tenant-123")
-
-    tenantID, err := FromContext(ctx)
-    assert.NoError(t, err)
-    assert.Equal(t, "tenant-123", tenantID)
-}
-
-func TestMissingTenant(t *testing.T) {
-    ctx := context.Background()
-    _, err := FromContext(ctx)
-    assert.Error(t, err)
-    assert.Equal(t, ErrNoTenantInContext, err)
-}
-```
-
-**Verification Command:**
-```bash
-go test -v ./internal/shared/tenancy/
-```
-
-**PHP Reference:**
-- `app/Traits/BelongsToTeam.php`
-- `team_uuid` fields in models
-
----
-
-## Task 1.12: Configuration Management
-
-**Task ID:** P1-FOUNDATION-012
-
-**Description:** Set up configuration management using Viper
-
-**Priority:** High
-
-**Estimated Complexity:** M (4-8h)
-
-**Dependencies:**
-- P0-INFRA-001
-
-**Acceptance Criteria:**
-- [ ] Viper configuration initialized
-- [ ] Config struct defined for all settings
-- [ ] Environment variable support
-- [ ] Config file support (YAML)
-- [ ] Config validation
-- [ ] Hot reload support (optional)
-- [ ] Multiple environments (dev, staging, prod)
-
-**Files to Create:**
-```
-internal/shared/config/config.go
-internal/shared/config/loader.go
-internal/shared/config/config_test.go
-configs/dev/config.yaml
-configs/staging/config.yaml
-configs/prod/config.yaml
-```
-
-**Implementation Steps:**
-1. Define Config struct with all settings
-2. Initialize Viper
-3. Load from file and environment
-4. Add validation
-5. Create helper functions
-6. Write tests
-
-**Testing:**
-```go
-func TestConfigLoad(t *testing.T) {
-    cfg, err := LoadConfig("../../configs/dev")
-    assert.NoError(t, err)
-    assert.Equal(t, "0.0.0.0", cfg.Server.Host)
-    assert.Equal(t, 8080, cfg.Server.Port)
-}
-```
-
-**Verification Command:**
-```bash
-go test -v ./internal/shared/config/
-```
-
-**PHP Reference:**
-- `config/` directory in Laravel
-- `.env` file usage
-
----
-
-
----
-
-## Task 1.13: HTTP Server Setup
-
-**Task ID:** P1-FOUNDATION-013
-
-**Description:** Set up HTTP server infrastructure with Gin framework
-
-**Priority:** Critical
-
-**Estimated Complexity:** M (4-8h)
-
-**Dependencies:**
-- P0-INFRA-001
-- P1-FOUNDATION-004 (Error Types)
-
-**Acceptance Criteria:**
-- [ ] Gin HTTP server configured
-- [ ] Middleware setup (logging, recovery, CORS)
-- [ ] Health check endpoint
-- [ ] Graceful shutdown
-- [ ] Request/response logging
-- [ ] Error handling middleware
-- [ ] Rate limiting middleware
-- [ ] Request ID generation
-
-**Files to Create:**
-```
-internal/shared/http/server/server.go
-internal/shared/http/server/middleware/logging.go
-internal/shared/http/server/middleware/recovery.go
-internal/shared/http/server/middleware/cors.go
-internal/shared/http/server/middleware/ratelimit.go
-cmd/api/main.go
+control-plane/internal/tenant/
+├── model.go           # Tenant struct
+├── repository.go      # GORM repository
+├── service.go         # Business logic
+└── service_test.go    # Unit tests
 ```
 
 **Implementation:**
-
 ```go
-// internal/shared/http/server/server.go
-package server
+// control-plane/internal/tenant/model.go
+package tenant
+
+import (
+    "time"
+    "github.com/google/uuid"
+)
+
+type Tenant struct {
+    ID                  uuid.UUID   `gorm:"type:uuid;primary_key;default:gen_random_uuid()"`
+    Name                string      `gorm:"not null;size:255"`
+    Slug                string      `gorm:"unique;not null;size:100"`
+    Domain              string      `gorm:"unique;not null;size:255"`
+    SchemaName          string      `gorm:"unique;not null;size:63"`
+    FormanceLedgerID    string      `gorm:"size:255"`
+    FormanceOrgID       string      `gorm:"size:255"`
+    KratosRealmID       string      `gorm:"size:255"`
+    KetoNamespacePrefix string      `gorm:"size:63"`
+    Status              TenantStatus `gorm:"size:20;default:'provisioning'"`
+    Metadata            map[string]interface{} `gorm:"type:jsonb"`
+    CreatedAt           time.Time
+    UpdatedAt           time.Time
+}
+
+type TenantStatus string
+
+const (
+    TenantStatusProvisioning TenantStatus = "provisioning"
+    TenantStatusActive       TenantStatus = "active"
+    TenantStatusSuspended    TenantStatus = "suspended"
+    TenantStatusDeleted      TenantStatus = "deleted"
+)
+
+// control-plane/internal/tenant/repository.go
+package tenant
 
 import (
     "context"
-    "net/http"
-    "time"
-    
-    "github.com/gin-gonic/gin"
-    "go.uber.org/zap"
+    "fmt"
+    "gorm.io/gorm"
+    "github.com/google/uuid"
 )
 
-type Server struct {
-    router *gin.Engine
-    server *http.Server
-    logger *zap.Logger
+type Repository interface {
+    Create(ctx context.Context, tenant *Tenant) error
+    GetByID(ctx context.Context, id uuid.UUID) (*Tenant, error)
+    GetByDomain(ctx context.Context, domain string) (*Tenant, error)
+    GetBySlug(ctx context.Context, slug string) (*Tenant, error)
+    List(ctx context.Context, limit, offset int) ([]*Tenant, error)
+    Update(ctx context.Context, tenant *Tenant) error
+    Delete(ctx context.Context, id uuid.UUID) error
 }
 
-func New(logger *zap.Logger) *Server {
-    router := gin.New()
-    
-    // Apply middleware
-    router.Use(gin.Recovery())
-    router.Use(LoggingMiddleware(logger))
-    router.Use(CORSMiddleware())
-    router.Use(RequestIDMiddleware())
-    
-    // Health check
-    router.GET("/health", func(c *gin.Context) {
-        c.JSON(200, gin.H{"status": "healthy"})
-    })
-    
-    return &Server{
-        router: router,
-        logger: logger,
-        server: &http.Server{
-            Addr:         ":8080",
-            Handler:      router,
-            ReadTimeout:  15 * time.Second,
-            WriteTimeout: 15 * time.Second,
-            IdleTimeout:  60 * time.Second,
-        },
-    }
+type repository struct {
+    db *gorm.DB
 }
 
-func (s *Server) Start() error {
-    s.logger.Info("starting HTTP server", zap.String("addr", s.server.Addr))
-    return s.server.ListenAndServe()
+func NewRepository(db *gorm.DB) Repository {
+    return &repository{db: db}
 }
 
-func (s *Server) Shutdown(ctx context.Context) error {
-    s.logger.Info("shutting down HTTP server")
-    return s.server.Shutdown(ctx)
+func (r *repository) Create(ctx context.Context, tenant *Tenant) error {
+    return r.db.WithContext(ctx).Create(tenant).Error
 }
 
-func (s *Server) Router() *gin.Engine {
-    return s.router
-}
-```
-
----
-
-## Task 1.14: HTTP Client Setup
-
-**Task ID:** P1-FOUNDATION-014
-
-**Description:** Configure HTTP client for external API calls with retry and circuit breaker
-
-**Priority:** High
-
-**Estimated Complexity:** M (4-8h)
-
-**Dependencies:**
-- P0-INFRA-001
-- P1-FOUNDATION-004 (Error Types)
-
-**Acceptance Criteria:**
-- [ ] HTTP client with timeout configuration
-- [ ] Retry mechanism with exponential backoff
-- [ ] Circuit breaker pattern
-- [ ] Request/response logging
-- [ ] Custom error handling
-- [ ] Connection pooling
-- [ ] TLS configuration
-
-**Files to Create:**
-```
-internal/shared/http/client/client.go
-internal/shared/http/client/retry.go
-internal/shared/http/client/circuit_breaker.go
-internal/shared/http/client/client_test.go
-```
-
-**Implementation:**
-
-```go
-// internal/shared/http/client/client.go
-package client
-
-import (
-    "context"
-    "net/http"
-    "time"
-    
-    "go.uber.org/zap"
-)
-
-type Config struct {
-    Timeout        time.Duration
-    MaxRetries     int
-    RetryWaitMin   time.Duration
-    RetryWaitMax   time.Duration
-    MaxIdleConns   int
-    IdleConnTimeout time.Duration
-}
-
-type Client struct {
-    httpClient     *http.Client
-    logger         *zap.Logger
-    config         Config
-    circuitBreaker *CircuitBreaker
-}
-
-func New(config Config, logger *zap.Logger) *Client {
-    transport := &http.Transport{
-        MaxIdleConns:        config.MaxIdleConns,
-        MaxIdleConnsPerHost: config.MaxIdleConns,
-        IdleConnTimeout:     config.IdleConnTimeout,
-    }
-    
-    return &Client{
-        httpClient: &http.Client{
-            Timeout:   config.Timeout,
-            Transport: transport,
-        },
-        logger:         logger,
-        config:         config,
-        circuitBreaker: NewCircuitBreaker(5, 30*time.Second),
-    }
-}
-
-func (c *Client) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
-    return c.doWithRetry(ctx, req)
-}
-
-func (c *Client) doWithRetry(ctx context.Context, req *http.Request) (*http.Response, error) {
-    var resp *http.Response
-    var err error
-    
-    for attempt := 0; attempt <= c.config.MaxRetries; attempt++ {
-        if attempt > 0 {
-            wait := calculateBackoff(attempt, c.config.RetryWaitMin, c.config.RetryWaitMax)
-            time.Sleep(wait)
-        }
-        
-        resp, err = c.httpClient.Do(req.WithContext(ctx))
-        
-        if err == nil && resp.StatusCode < 500 {
-            return resp, nil
-        }
-        
-        c.logger.Warn("HTTP request failed, retrying",
-            zap.Int("attempt", attempt+1),
-            zap.Error(err),
-        )
-    }
-    
-    return resp, err
-}
-```
-
----
-
-## Task 1.15: Workflow Engine Setup (Temporal)
-
-**Task ID:** P1-FOUNDATION-015
-
-**Description:** Configure Temporal workflow engine for saga patterns and long-running processes
-
-**Priority:** High
-
-**Estimated Complexity:** L (8-16h)
-
-**Dependencies:**
-- P0-INFRA-001
-- P1-FOUNDATION-004 (Error Types)
-
-**Acceptance Criteria:**
-- [ ] Temporal client configured
-- [ ] Worker setup for workflow execution
-- [ ] Activity registration framework
-- [ ] Workflow registration framework
-- [ ] Error handling and retry policies
-- [ ] Workflow context helpers
-- [ ] Integration tests with Temporal TestServer
-
-**Files to Create:**
-```
-internal/shared/workflow/temporal/client.go
-internal/shared/workflow/temporal/worker.go
-internal/shared/workflow/temporal/config.go
-internal/shared/workflow/temporal/client_test.go
-pkg/workflow/context.go
-pkg/workflow/activity.go
-```
-
-**Implementation:**
-
-```go
-// internal/shared/workflow/temporal/client.go
-package temporal
-
-import (
-    "go.temporal.io/sdk/client"
-    "go.uber.org/zap"
-)
-
-type Config struct {
-    HostPort  string
-    Namespace string
-    Logger    *zap.Logger
-}
-
-type Client struct {
-    client client.Client
-    config Config
-}
-
-func NewClient(config Config) (*Client, error) {
-    c, err := client.Dial(client.Options{
-        HostPort:  config.HostPort,
-        Namespace: config.Namespace,
-        Logger:    NewZapAdapter(config.Logger),
-    })
-    
+func (r *repository) GetByDomain(ctx context.Context, domain string) (*Tenant, error) {
+    var tenant Tenant
+    err := r.db.WithContext(ctx).Where("domain = ?", domain).First(&tenant).Error
     if err != nil {
         return nil, err
     }
-    
-    return &Client{
-        client: c,
-        config: config,
-    }, nil
+    return &tenant, nil
 }
 
-func (c *Client) ExecuteWorkflow(ctx context.Context, options client.StartWorkflowOptions, workflow interface{}, args ...interface{}) (client.WorkflowRun, error) {
-    return c.client.ExecuteWorkflow(ctx, options, workflow, args...)
-}
-
-func (c *Client) Close() {
-    c.client.Close()
-}
-
-// internal/shared/workflow/temporal/worker.go
-package temporal
+// control-plane/internal/tenant/service.go
+package tenant
 
 import (
-    "go.temporal.io/sdk/worker"
-    "go.temporal.io/sdk/workflow"
+    "context"
+    "fmt"
+    "strings"
+    "github.com/google/uuid"
+    "github.com/gosimple/slug"
 )
 
-type Worker struct {
-    worker worker.Worker
+type Service interface {
+    CreateTenant(ctx context.Context, input CreateTenantInput) (*Tenant, error)
+    GetTenantByDomain(ctx context.Context, domain string) (*Tenant, error)
+    ActivateTenant(ctx context.Context, tenantID uuid.UUID) error
+    SuspendTenant(ctx context.Context, tenantID uuid.UUID) error
 }
 
-func NewWorker(c client.Client, taskQueue string) *Worker {
-    w := worker.New(c, taskQueue, worker.Options{})
-    return &Worker{worker: w}
+type service struct {
+    repo Repository
 }
 
-func (w *Worker) RegisterWorkflow(workflow interface{}) {
-    w.worker.RegisterWorkflow(workflow)
+func NewService(repo Repository) Service {
+    return &service{repo: repo}
 }
 
-func (w *Worker) RegisterActivity(activity interface{}) {
-    w.worker.RegisterActivity(activity)
+type CreateTenantInput struct {
+    Name   string
+    Domain string
 }
 
-func (w *Worker) Start() error {
-    return w.worker.Start()
-}
+func (s *service) CreateTenant(ctx context.Context, input CreateTenantInput) (*Tenant, error) {
+    // Generate slug from name
+    tenantSlug := slug.Make(input.Name)
 
-func (w *Worker) Stop() {
-    w.worker.Stop()
-}
-```
+    // Generate schema name (max 63 chars for Postgres)
+    schemaName := fmt.Sprintf("tenant_%s", strings.ReplaceAll(uuid.New().String(), "-", "")[:12])
 
-# Phase 2: Account Domain (Critical)
-
-**Duration:** Weeks 3-4
-**Goal:** Implement core account management with event sourcing
-**Dependencies:** Phase 1
-
-## Task 2.1: Account Aggregate
-
-**Task ID:** P2-ACCOUNT-001
-
-**Description:** Implement Account aggregate with event sourcing
-
-**Priority:** Critical
-
-**Estimated Complexity:** L (8-16h)
-
-**Dependencies:**
-- P1-FOUNDATION-010 (AggregateRoot)
-- P1-FOUNDATION-001 (Money)
-
-**Acceptance Criteria:**
-- [ ] Account aggregate struct
-- [ ] Business methods: CreateAccount, Deposit, Withdraw, Freeze, Unfreeze
-- [ ] Events: AccountCreated, Deposited, Withdrawn, AccountFrozen, AccountUnfrozen
-- [ ] Event application methods (ApplyAccountCreated, etc.)
-- [ ] Business rule validations (sufficient balance, not frozen, etc.)
-- [ ] Multi-asset balance support
-- [ ] Unit tests (>90% coverage)
-
-**Files to Create:**
-```
-internal/domain/account/aggregate/account.go
-internal/domain/account/aggregate/account_test.go
-internal/domain/account/event/account_created.go
-internal/domain/account/event/deposited.go
-internal/domain/account/event/withdrawn.go
-internal/domain/account/event/account_frozen.go
-internal/domain/account/event/account_unfrozen.go
-```
-
-**Implementation Steps:**
-1. Define Account aggregate:
-   ```go
-   type Account struct {
-       *aggregate.AggregateRoot
-       accountID   string
-       name        string
-       balances    map[string]money.Money  // currency -> balance
-       status      AccountStatus
-       metadata    map[string]interface{}
-   }
-   ```
-2. Implement CreateAccount command:
-   ```go
-   func Create(accountID, name string, metadata map[string]interface{}) *Account {
-       a := &Account{
-           AggregateRoot: aggregate.NewAggregateRoot(accountID, "Account"),
-       }
-       a.RecordThat(AccountCreated{
-           AccountID: accountID,
-           Name:      name,
-           Metadata:  metadata,
-           Timestamp: time.Now(),
-       })
-       return a
-   }
-   ```
-3. Implement Deposit:
-   ```go
-   func (a *Account) Deposit(amount money.Money, reference string) error {
-       if a.status == AccountStatusFrozen {
-           return ErrAccountFrozen
-       }
-       a.RecordThat(Deposited{
-           AccountID: a.accountID,
-           Amount:    amount,
-           Reference: reference,
-           Timestamp: time.Now(),
-       })
-       return nil
-   }
-   ```
-4. Implement Withdraw with balance check
-5. Implement Freeze/Unfreeze
-6. Implement event application methods:
-   ```go
-   func (a *Account) ApplyAccountCreated(event AccountCreated) {
-       a.accountID = event.AccountID
-       a.name = event.Name
-       a.balances = make(map[string]money.Money)
-       a.status = AccountStatusActive
-       a.metadata = event.Metadata
-   }
-
-   func (a *Account) ApplyDeposited(event Deposited) {
-       currency := event.Amount.Currency
-       if existing, ok := a.balances[currency]; ok {
-           a.balances[currency], _ = existing.Add(event.Amount)
-       } else {
-           a.balances[currency] = event.Amount
-       }
-   }
-   ```
-7. Write comprehensive tests
-
-**Testing:**
-```go
-func TestAccountCreation(t *testing.T) {
-    acc := Create("acc-123", "Test Account", nil)
-    assert.Equal(t, "acc-123", acc.accountID)
-    assert.Equal(t, AccountStatusActive, acc.status)
-    assert.Len(t, acc.GetUncommittedEvents(), 1)
-}
-
-func TestAccountDeposit(t *testing.T) {
-    acc := Create("acc-123", "Test", nil)
-    acc.ClearUncommittedEvents()  // Clear creation event
-
-    amount := money.NewMoney(decimal.NewFromInt(100), "USD")
-    err := acc.Deposit(amount, "ref-1")
-    assert.NoError(t, err)
-
-    assert.Equal(t, amount, acc.balances["USD"])
-    assert.Len(t, acc.GetUncommittedEvents(), 1)
-}
-
-func TestAccountWithdrawInsufficientBalance(t *testing.T) {
-    acc := Create("acc-123", "Test", nil)
-    acc.Deposit(money.NewMoney(decimal.NewFromInt(50), "USD"), "ref-1")
-
-    err := acc.Withdraw(money.NewMoney(decimal.NewFromInt(100), "USD"), "ref-2")
-    assert.Error(t, err)
-    assert.Equal(t, ErrInsufficientBalance, err)
-}
-
-func TestAccountFreeze(t *testing.T) {
-    acc := Create("acc-123", "Test", nil)
-    acc.Freeze("compliance-investigation")
-
-    assert.Equal(t, AccountStatusFrozen, acc.status)
-
-    // Should not allow deposits when frozen
-    err := acc.Deposit(money.NewMoney(decimal.NewFromInt(100), "USD"), "ref-1")
-    assert.Error(t, err)
-    assert.Equal(t, ErrAccountFrozen, err)
-}
-
-func TestAccountReconstitution(t *testing.T) {
-    store := setupTestEventStore(t)
-
-    // Create and modify account
-    acc := Create("acc-123", "Test", nil)
-    acc.Deposit(money.NewMoney(decimal.NewFromInt(100), "USD"), "ref-1")
-    acc.Deposit(money.NewMoney(decimal.NewFromInt(50), "EUR"), "ref-2")
-    acc.Persist(context.Background(), store)
-
-    // Retrieve and verify
-    retrieved := &Account{AggregateRoot: aggregate.NewAggregateRoot("acc-123", "Account")}
-    err := retrieved.Retrieve(context.Background(), store, "acc-123")
-    assert.NoError(t, err)
-    assert.Equal(t, "Test", retrieved.name)
-    assert.Equal(t, money.NewMoney(decimal.NewFromInt(100), "USD"), retrieved.balances["USD"])
-    assert.Equal(t, money.NewMoney(decimal.NewFromInt(50), "EUR"), retrieved.balances["EUR"])
-}
-```
-
-**Verification Command:**
-```bash
-go test -v ./internal/domain/account/aggregate/
-```
-
-**PHP Reference:**
-- `app/Domain/Account/Aggregates/` (if exists, or inferred from events)
-- `app/Domain/Account/Events/`
-- `app/Domain/Account/Models/Account.php`
-
----
-
-## Task 2.2: Account Commands
-
-**Task ID:** P2-ACCOUNT-002
-
-**Description:** Implement account command DTOs
-
-**Priority:** Critical
-
-**Estimated Complexity:** S (2-4h)
-
-**Dependencies:**
-- P2-ACCOUNT-001
-
-**Acceptance Criteria:**
-- [ ] CreateAccountCommand
-- [ ] DepositCommand
-- [ ] WithdrawCommand
-- [ ] TransferCommand
-- [ ] FreezeAccountCommand
-- [ ] UnfreezeAccountCommand
-- [ ] All commands implement Command interface
-- [ ] Validation tags
-
-**Files to Create:**
-```
-internal/application/command/account/create_account.go
-internal/application/command/account/deposit.go
-internal/application/command/account/withdraw.go
-internal/application/command/account/transfer.go
-internal/application/command/account/freeze_account.go
-internal/application/command/account/unfreeze_account.go
-```
-
-**Implementation Steps:**
-1. Define each command struct with fields
-2. Implement CommandName() method
-3. Add validation tags
-4. Write tests
-
-**Testing:**
-```go
-func TestCreateAccountCommand(t *testing.T) {
-    cmd := CreateAccountCommand{
-        AccountID: "acc-123",
-        Name:      "Test Account",
-        TenantID:  "tenant-1",
-    }
-    assert.Equal(t, "account.create", cmd.CommandName())
-}
-```
-
-**Verification Command:**
-```bash
-go test -v ./internal/application/command/account/
-```
-
----
-
-## Task 2.3: Account Command Handlers
-
-**Task ID:** P2-ACCOUNT-003
-
-**Description:** Implement command handlers for account operations
-
-**Priority:** Critical
-
-**Estimated Complexity:** L (8-16h)
-
-**Dependencies:**
-- P2-ACCOUNT-002
-- P1-FOUNDATION-006 (CommandBus)
-- P1-FOUNDATION-009 (EventStore)
-
-**Acceptance Criteria:**
-- [ ] CreateAccountHandler
-- [ ] DepositHandler
-- [ ] WithdrawHandler
-- [ ] TransferHandler (creates transaction, debits one account, credits another)
-- [ ] FreezeAccountHandler
-- [ ] UnfreezeAccountHandler
-- [ ] All handlers implement CommandHandler interface
-- [ ] Integration with EventStore
-- [ ] Unit tests with mocked EventStore
-- [ ] Integration tests with real EventStore
-
-**Files to Create:**
-```
-internal/application/command/account/handler/create_account_handler.go
-internal/application/command/account/handler/deposit_handler.go
-internal/application/command/account/handler/withdraw_handler.go
-internal/application/command/account/handler/transfer_handler.go
-internal/application/command/account/handler/freeze_account_handler.go
-internal/application/command/account/handler/unfreeze_account_handler.go
-internal/application/command/account/handler/handler_test.go
-```
-
-**Implementation Steps:**
-1. Implement CreateAccountHandler:
-   ```go
-   type CreateAccountHandler struct {
-       eventStore events.EventStore
-   }
-
-   func (h *CreateAccountHandler) Handle(ctx context.Context, cmd cqrs.Command) error {
-       createCmd := cmd.(CreateAccountCommand)
-
-       // Create aggregate
-       acc := account.Create(createCmd.AccountID, createCmd.Name, createCmd.Metadata)
-
-       // Persist
-       return acc.Persist(ctx, h.eventStore)
-   }
-   ```
-2. Implement DepositHandler (retrieve aggregate, call Deposit, persist)
-3. Implement WithdrawHandler
-4. Implement TransferHandler (saga-like, two account operations)
-5. Implement Freeze/Unfreeze handlers
-6. Write tests with mocked event store
-7. Write integration tests
-
-**Testing:**
-```go
-func TestCreateAccountHandler(t *testing.T) {
-    store := setupTestEventStore(t)
-    handler := NewCreateAccountHandler(store)
-
-    cmd := CreateAccountCommand{
-        AccountID: "acc-123",
-        Name:      "Test Account",
-        TenantID:  "tenant-1",
+    tenant := &Tenant{
+        Name:       input.Name,
+        Slug:       tenantSlug,
+        Domain:     input.Domain,
+        SchemaName: schemaName,
+        Status:     TenantStatusProvisioning,
+        Metadata:   make(map[string]interface{}),
     }
 
-    err := handler.Handle(context.Background(), cmd)
-    assert.NoError(t, err)
+    if err := s.repo.Create(ctx, tenant); err != nil {
+        return nil, fmt.Errorf("failed to create tenant: %w", err)
+    }
 
-    // Verify events were saved
-    events, err := store.Load(context.Background(), "acc-123")
-    assert.NoError(t, err)
-    assert.Len(t, events, 1)
+    return tenant, nil
 }
 
-func TestDepositHandler(t *testing.T) {
-    store := setupTestEventStore(t)
-
-    // Create account first
-    createHandler := NewCreateAccountHandler(store)
-    createHandler.Handle(ctx, CreateAccountCommand{AccountID: "acc-123", Name: "Test"})
-
-    // Deposit
-    depositHandler := NewDepositHandler(store)
-    err := depositHandler.Handle(ctx, DepositCommand{
-        AccountID: "acc-123",
-        Amount:    money.NewMoney(decimal.NewFromInt(100), "USD"),
-        Reference: "ref-1",
-    })
-    assert.NoError(t, err)
-
-    // Verify
-    events, _ := store.Load(ctx, "acc-123")
-    assert.Len(t, events, 2)  // AccountCreated + Deposited
+func (s *service) GetTenantByDomain(ctx context.Context, domain string) (*Tenant, error) {
+    return s.repo.GetByDomain(ctx, domain)
 }
 
-func TestTransferHandler(t *testing.T) {
-    store := setupTestEventStore(t)
+func (s *service) ActivateTenant(ctx context.Context, tenantID uuid.UUID) error {
+    tenant, err := s.repo.GetByID(ctx, tenantID)
+    if err != nil {
+        return err
+    }
 
-    // Create two accounts
-    // ... setup code ...
-
-    // Transfer
-    transferHandler := NewTransferHandler(store)
-    err := transferHandler.Handle(ctx, TransferCommand{
-        FromAccountID: "acc-123",
-        ToAccountID:   "acc-456",
-        Amount:        money.NewMoney(decimal.NewFromInt(50), "USD"),
-        Reference:     "transfer-1",
-    })
-    assert.NoError(t, err)
-
-    // Verify both accounts were updated
-    // ... verification code ...
+    tenant.Status = TenantStatusActive
+    return s.repo.Update(ctx, tenant)
 }
 ```
-
-**Verification Command:**
-```bash
-go test -v ./internal/application/command/account/handler/
-```
-
-**PHP Reference:**
-- `app/Domain/Account/Services/AccountService.php`
-- `app/Domain/Account/Workflows/`
-
----
-
-## Task 2.4: Account Projections (Read Models)
-
-**Task ID:** P2-ACCOUNT-004
-
-**Description:** Create Account read models and projectors
-
-**Priority:** Critical
-
-**Estimated Complexity:** M (4-8h)
-
-**Dependencies:**
-- P2-ACCOUNT-001
-- P1-FOUNDATION-008 (EventBus)
-
-**Acceptance Criteria:**
-- [ ] Account projection model (GORM)
-- [ ] AccountBalance projection model
-- [ ] Transaction projection model
-- [ ] Projector to build read models from events
-- [ ] Database migration for projection tables
-- [ ] Unit tests
-- [ ] Integration tests
-
-**Files to Create:**
-```
-internal/domain/account/projection/account.go
-internal/domain/account/projection/account_balance.go
-internal/domain/account/projection/transaction.go
-internal/domain/account/projector/account_projector.go
-internal/domain/account/projector/account_projector_test.go
-migrations/00010_create_account_projections.sql
-```
-
-**Implementation Steps:**
-1. Define projection models:
-   ```go
-   type Account struct {
-       ID        string    `gorm:"primaryKey"`
-       Name      string
-       Status    string
-       TenantID  string    `gorm:"index"`
-       CreatedAt time.Time
-       UpdatedAt time.Time
-   }
-
-   type AccountBalance struct {
-       ID        uint      `gorm:"primaryKey"`
-       AccountID string    `gorm:"index"`
-       Currency  string
-       Balance   string    // decimal as string
-       CreatedAt time.Time
-       UpdatedAt time.Time
-   }
-
-   type Transaction struct {
-       ID        string    `gorm:"primaryKey"`
-       AccountID string    `gorm:"index"`
-       Type      string    // deposit, withdraw, transfer_debit, transfer_credit
-       Amount    string
-       Currency  string
-       Reference string
-       CreatedAt time.Time
-   }
-   ```
-2. Create database migration
-3. Implement AccountProjector:
-   ```go
-   type AccountProjector struct {
-       db *gorm.DB
-   }
-
-   func (p *AccountProjector) OnAccountCreated(ctx context.Context, event AccountCreated) error {
-       return p.db.Create(&Account{
-           ID:        event.AccountID,
-           Name:      event.Name,
-           Status:    "active",
-           TenantID:  event.TenantID,
-           CreatedAt: event.Timestamp,
-       }).Error
-   }
-
-   func (p *AccountProjector) OnDeposited(ctx context.Context, event Deposited) error {
-       // Update or create balance
-       var balance AccountBalance
-       err := p.db.Where("account_id = ? AND currency = ?",
-           event.AccountID, event.Amount.Currency).First(&balance).Error
-
-       if err == gorm.ErrRecordNotFound {
-           // Create new balance
-           return p.db.Create(&AccountBalance{
-               AccountID: event.AccountID,
-               Currency:  event.Amount.Currency,
-               Balance:   event.Amount.Amount.String(),
-           }).Error
-       }
-
-       // Update existing
-       current, _ := decimal.NewFromString(balance.Balance)
-       newBalance, _ := current.Add(event.Amount.Amount)
-       balance.Balance = newBalance.String()
-       return p.db.Save(&balance).Error
-   }
-   ```
-4. Register projector with EventBus
-5. Write tests
 
 **Testing:**
 ```go
-func TestAccountProjector(t *testing.T) {
+// control-plane/internal/tenant/service_test.go
+package tenant_test
+
+import (
+    "testing"
+    "context"
+    "github.com/stretchr/testify/assert"
+    "github.com/stretchr/testify/require"
+)
+
+func TestTenantService_CreateTenant(t *testing.T) {
     db := setupTestDB(t)
-    projector := NewAccountProjector(db)
+    repo := tenant.NewRepository(db)
+    svc := tenant.NewService(repo)
 
-    // Project AccountCreated
-    event := AccountCreated{
-        AccountID: "acc-123",
-        Name:      "Test Account",
-        TenantID:  "tenant-1",
-        Timestamp: time.Now(),
+    ctx := context.Background()
+
+    input := tenant.CreateTenantInput{
+        Name:   "Acme Bank",
+        Domain: "acme-bank.finaegis.com",
     }
 
-    err := projector.OnAccountCreated(context.Background(), event)
-    assert.NoError(t, err)
-
-    // Verify projection
-    var acc Account
-    err = db.First(&acc, "id = ?", "acc-123").Error
-    assert.NoError(t, err)
-    assert.Equal(t, "Test Account", acc.Name)
+    created, err := svc.CreateTenant(ctx, input)
+    require.NoError(t, err)
+    assert.NotNil(t, created.ID)
+    assert.Equal(t, "acme-bank", created.Slug)
+    assert.Equal(t, "acme-bank.finaegis.com", created.Domain)
+    assert.NotEmpty(t, created.SchemaName)
+    assert.Equal(t, tenant.TenantStatusProvisioning, created.Status)
 }
 
-func TestDepositProjection(t *testing.T) {
+func TestTenantService_GetByDomain(t *testing.T) {
     db := setupTestDB(t)
-    projector := NewAccountProjector(db)
+    repo := tenant.NewRepository(db)
+    svc := tenant.NewService(repo)
 
-    // Create account first
-    projector.OnAccountCreated(ctx, AccountCreated{AccountID: "acc-123", ...})
+    ctx := context.Background()
 
-    // Project deposit
-    event := Deposited{
-        AccountID: "acc-123",
-        Amount:    money.NewMoney(decimal.NewFromInt(100), "USD"),
-        Reference: "ref-1",
-        Timestamp: time.Now(),
+    // Create tenant
+    input := tenant.CreateTenantInput{
+        Name:   "Test Bank",
+        Domain: "test.com",
     }
+    created, _ := svc.CreateTenant(ctx, input)
 
-    err := projector.OnDeposited(context.Background(), event)
-    assert.NoError(t, err)
-
-    // Verify balance
-    var balance AccountBalance
-    err = db.Where("account_id = ? AND currency = ?", "acc-123", "USD").First(&balance).Error
-    assert.NoError(t, err)
-    assert.Equal(t, "100", balance.Balance)
+    // Retrieve by domain
+    retrieved, err := svc.GetTenantByDomain(ctx, "test.com")
+    require.NoError(t, err)
+    assert.Equal(t, created.ID, retrieved.ID)
 }
 ```
-
-**Verification Command:**
-```bash
-make migrate-up
-go test -v ./internal/domain/account/projector/
-```
-
-**PHP Reference:**
-- `app/Domain/Account/Projectors/AccountProjector.php`
-- `app/Domain/Account/Models/Account.php` (projection model)
-- `database/migrations/` for account tables
 
 ---
 
-## Task 2.5: Account Queries
+[Continue with remaining Phase 1 tasks 1.2-1.8...]
 
-**Task ID:** P2-ACCOUNT-005
 
-**Description:** Implement account query DTOs and handlers
 
+## Phase 2: Ory Stack Integration
+
+**Duration:** Weeks 5-7 (3 weeks)
+**Goal:** Integrate Ory Kratos, Keto, and Oathkeeper
+**Dependencies:** Phase 0, Phase 1
+
+### Tasks Overview (12 tasks, 120 hours)
+
+- **2.1:** Ory Kratos SDK Integration (tenant-scoped realms)
+- **2.2:** Kratos Identity Schema Design (user profiles)
+- **2.3:** Kratos Authentication Flows (login, registration, recovery)
+- **2.4:** Kratos Session Management & Validation
+- **2.5:** Ory Keto SDK Integration (ReBAC)
+- **2.6:** Keto Namespace Configuration (accounts, wallets, transactions)
+- **2.7:** Keto Relationship Tuple Management (create, delete, check)
+- **2.8:** Two-Layer Permission Check Implementation
+- **2.9:** Ory Oathkeeper Routing Configuration
+- **2.10:** Oathkeeper Access Rules (domain → tenant mapping)
+- **2.11:** Oathkeeper Authenticator/Authorizer Pipeline
+- **2.12:** Integration Testing (Ory stack end-to-end)
+
+[Detailed tasks to be added]
+
+---
+
+
+## Phase 3: Formance Integration
+
+**Duration:** Weeks 8-10 (2.5 weeks)
+**Goal:** Integrate Formance Ledger and Wallets
+**Dependencies:** Phase 0, Phase 1
+
+### Tasks Overview (10 tasks, 100 hours)
+
+- **3.1:** Formance SDK Setup (Ledger + Wallets clients)
+- **3.2:** Formance Ledger Instance Provisioning (per tenant)
+- **3.3:** Formance Wallets Configuration (multi-asset support)
+- **3.4:** Wallet Mapping Service (Postgres ↔ Formance IDs)
+- **3.5:** Money Movement API (credit, debit, transfer via Formance)
+- **3.6:** Balance Query Service (real-time from Formance)
+- **3.7:** Transaction History Query (Formance Ledger API)
+- **3.8:** Hold/Reserve Management (Formance holds)
+- **3.9:** Multi-Asset Support (USD, EUR, BTC, etc.)
+- **3.10:** Formance Webhooks (transaction notifications)
+
+[Detailed tasks to be added]
+
+---
+
+
+## Phase 4: Event Horizon Setup (Event Sourcing for Non-Financial Domains)
+
+**Duration:** Weeks 11-12 (1.5 weeks)
+**Goal:** Set up Event Horizon framework for compliance, governance, and workflow domains
+**Dependencies:** Phase 0
+
+---
+
+### Task 4.1: Event Horizon SDK Installation
+
+**Task ID:** P4-EVENTHORIZON-001
+**Description:** Install and configure Event Horizon v0.16+ for event sourcing
+**Priority:** Critical
+**Complexity:** S (1-3h)
+
+**Dependencies:** P0-INFRA-001
+
+**Acceptance Criteria:**
+- [ ] Event Horizon SDK installed (github.com/looplab/eventhorizon)
+- [ ] MongoDB driver for event store configured
+- [ ] Redis for event bus configured
+- [ ] Basic event store configuration working
+
+**Implementation:**
+```bash
+go get github.com/looplab/eventhorizon/v2
+go get github.com/looplab/eventhorizon/v2/eventstore/mongodb
+go get github.com/looplab/eventhorizon/v2/eventbus/redis
+```
+
+**Configuration:**
+```go
+// pkg/eventhorizon/config.go
+package eventhorizon
+
+import (
+    "context"
+    "github.com/looplab/eventhorizon/v2"
+    mongostore "github.com/looplab/eventhorizon/v2/eventstore/mongodb"
+    redisbus "github.com/looplab/eventhorizon/v2/eventbus/redis"
+)
+
+func NewEventStore(ctx context.Context, tenantID string) (eventhorizon.EventStore, error) {
+    // Tenant-scoped MongoDB collection
+    collectionName := fmt.Sprintf("events_%s", tenantID)
+
+    store, err := mongostore.NewEventStore(
+        mongoURI,
+        dbName,
+        mongostore.WithCollectionName(collectionName),
+    )
+    return store, err
+}
+
+func NewEventBus(tenantID string) (eventhorizon.EventBus, error) {
+    // Tenant-scoped Redis stream
+    streamKey := fmt.Sprintf("events:%s", tenantID)
+
+    return redisbus.NewEventBus(
+        redisAddr,
+        redisbus.WithStreamKey(streamKey),
+    )
+}
+```
+
+**Testing:**
+```go
+func TestEventStoreCreation(t *testing.T) {
+    ctx := context.Background()
+    store, err := NewEventStore(ctx, "test-tenant")
+    require.NoError(t, err)
+    assert.NotNil(t, store)
+}
+```
+
+---
+
+### Task 4.2: Tenant-Scoped Event Store Tables
+
+**Task ID:** P4-EVENTHORIZON-002
+**Description:** Configure PostgreSQL event store tables per tenant schema
+**Priority:** Critical
+**Complexity:** M (4-8h)
+
+**Dependencies:** P4-EVENTHORIZON-001, P0-INFRA-004
+
+**Acceptance Criteria:**
+- [ ] Event store tables in each tenant schema
+- [ ] Snapshot tables in each tenant schema
+- [ ] Proper indexing for aggregate retrieval
+- [ ] Migration templates created
+
+**Schema Template:**
+```sql
+-- Add to tenant schema template
+-- Event store for non-financial domains (Compliance, Governance, etc.)
+
+CREATE TABLE events (
+    id BIGSERIAL PRIMARY KEY,
+    aggregate_id UUID NOT NULL,
+    aggregate_type VARCHAR(255) NOT NULL,
+    version INT NOT NULL,
+    event_type VARCHAR(255) NOT NULL,
+    data JSONB NOT NULL,
+    metadata JSONB,
+    timestamp TIMESTAMP DEFAULT NOW(),
+    UNIQUE(aggregate_id, version)
+);
+
+CREATE INDEX idx_events_aggregate ON events(aggregate_id);
+CREATE INDEX idx_events_type ON events(aggregate_type);
+CREATE INDEX idx_events_timestamp ON events(timestamp);
+
+CREATE TABLE snapshots (
+    id BIGSERIAL PRIMARY KEY,
+    aggregate_id UUID NOT NULL,
+    aggregate_type VARCHAR(255) NOT NULL,
+    version INT NOT NULL,
+    data JSONB NOT NULL,
+    timestamp TIMESTAMP DEFAULT NOW(),
+    UNIQUE(aggregate_id, version)
+);
+
+CREATE INDEX idx_snapshots_aggregate ON snapshots(aggregate_id);
+```
+
+**Testing:**
+```bash
+# Apply to test tenant schema
+psql -c "SET search_path TO tenant_test123; \i event-store-schema.sql"
+```
+
+---
+
+### Task 4.3: Aggregate Root Base Implementation
+
+**Task ID:** P4-EVENTHORIZON-003
+**Description:** Create base aggregate root with event sourcing patterns
+**Priority:** Critical
+**Complexity:** M (4-8h)
+
+**Dependencies:** P4-EVENTHORIZON-002
+
+**Acceptance Criteria:**
+- [ ] Base aggregate interface defined
+- [ ] Event application logic implemented
+- [ ] Version tracking working
+- [ ] Snapshot support added
+
+**Implementation:**
+```go
+// pkg/eventhorizon/aggregate.go
+package eventhorizon
+
+import (
+    "context"
+    "github.com/google/uuid"
+    eh "github.com/looplab/eventhorizon/v2"
+)
+
+// BaseAggregate provides common aggregate functionality
+type BaseAggregate struct {
+    ID      uuid.UUID
+    Version int
+    Events  []eh.Event
+}
+
+func (a *BaseAggregate) EntityID() uuid.UUID {
+    return a.ID
+}
+
+func (a *BaseAggregate) AggregateVersion() int {
+    return a.Version
+}
+
+func (a *BaseAggregate) ApplyEvent(ctx context.Context, event eh.Event) error {
+    a.Events = append(a.Events, event)
+    a.Version++
+    return nil
+}
+
+// Example: Compliance Alert Aggregate
+type ComplianceAlertAggregate struct {
+    BaseAggregate
+
+    AlertType   string
+    Severity    string
+    Status      string
+    Description string
+    AssignedTo  string
+    ResolvedBy  string
+}
+
+const ComplianceAlertAggregateType eh.AggregateType = "compliance_alert"
+
+func (a *ComplianceAlertAggregate) HandleCommand(ctx context.Context, cmd eh.Command) error {
+    switch cmd := cmd.(type) {
+    case *CreateAlertCommand:
+        return a.handleCreateAlert(ctx, cmd)
+    case *AssignAlertCommand:
+        return a.handleAssignAlert(ctx, cmd)
+    case *ResolveAlertCommand:
+        return a.handleResolveAlert(ctx, cmd)
+    default:
+        return fmt.Errorf("unsupported command: %T", cmd)
+    }
+}
+
+func (a *ComplianceAlertAggregate) handleCreateAlert(ctx context.Context, cmd *CreateAlertCommand) error {
+    // Business validation
+    if cmd.Severity == "" {
+        return fmt.Errorf("severity required")
+    }
+
+    // Record domain event
+    event := &AlertCreatedEvent{
+        AlertID:     a.ID,
+        AlertType:   cmd.AlertType,
+        Severity:    cmd.Severity,
+        Description: cmd.Description,
+    }
+
+    return a.ApplyEvent(ctx, event)
+}
+
+// Event handler
+func (a *ComplianceAlertAggregate) ApplyEvent(ctx context.Context, event eh.Event) error {
+    switch e := event.Data().(type) {
+    case *AlertCreatedEvent:
+        a.AlertType = e.AlertType
+        a.Severity = e.Severity
+        a.Status = "open"
+        a.Description = e.Description
+    case *AlertAssignedEvent:
+        a.AssignedTo = e.AssignedTo
+        a.Status = "investigating"
+    case *AlertResolvedEvent:
+        a.ResolvedBy = e.ResolvedBy
+        a.Status = "resolved"
+    }
+
+    return a.BaseAggregate.ApplyEvent(ctx, event)
+}
+```
+
+**Testing:**
+```go
+func TestComplianceAlertAggregate(t *testing.T) {
+    aggregate := &ComplianceAlertAggregate{
+        BaseAggregate: BaseAggregate{ID: uuid.New()},
+    }
+
+    cmd := &CreateAlertCommand{
+        AlertType:   "suspicious_activity",
+        Severity:    "high",
+        Description: "Large cash transaction",
+    }
+
+    err := aggregate.HandleCommand(context.Background(), cmd)
+    require.NoError(t, err)
+    assert.Equal(t, "suspicious_activity", aggregate.AlertType)
+    assert.Equal(t, "open", aggregate.Status)
+}
+```
+
+---
+
+### Task 4.4: Event Bus Configuration
+
+**Task ID:** P4-EVENTHORIZON-004
+**Description:** Set up event bus for domain event publishing
 **Priority:** High
+**Complexity:** M (4-8h)
 
-**Estimated Complexity:** M (4-8h)
-
-**Dependencies:**
-- P2-ACCOUNT-004
-- P1-FOUNDATION-007 (QueryBus)
+**Dependencies:** P4-EVENTHORIZON-003
 
 **Acceptance Criteria:**
-- [ ] GetAccountQuery + Handler
-- [ ] GetAccountBalanceQuery + Handler
-- [ ] GetAccountTransactionsQuery + Handler
-- [ ] ListAccountsQuery + Handler (with pagination)
-- [ ] Caching for balance queries
-- [ ] Unit tests
-- [ ] Integration tests
+- [ ] Redis-based event bus configured
+- [ ] Tenant-scoped event streams
+- [ ] Event handlers registration working
+- [ ] Retry and error handling implemented
 
-**Files to Create:**
+**Implementation:**
+```go
+// pkg/eventhorizon/eventbus.go
+package eventhorizon
+
+import (
+    "context"
+    eh "github.com/looplab/eventhorizon/v2"
+    redisbus "github.com/looplab/eventhorizon/v2/eventbus/redis"
+)
+
+type TenantEventBus struct {
+    buses map[string]eh.EventBus
+    redis string
+}
+
+func NewTenantEventBus(redisAddr string) *TenantEventBus {
+    return &TenantEventBus{
+        buses: make(map[string]eh.EventBus),
+        redis: redisAddr,
+    }
+}
+
+func (b *TenantEventBus) GetBusForTenant(tenantID string) (eh.EventBus, error) {
+    if bus, exists := b.buses[tenantID]; exists {
+        return bus, nil
+    }
+
+    streamKey := fmt.Sprintf("events:%s", tenantID)
+    bus, err := redisbus.NewEventBus(
+        b.redis,
+        redisbus.WithStreamKey(streamKey),
+    )
+    if err != nil {
+        return nil, err
+    }
+
+    b.buses[tenantID] = bus
+    return bus, nil
+}
 ```
-internal/application/query/account/get_account.go
-internal/application/query/account/get_account_balance.go
-internal/application/query/account/get_transactions.go
-internal/application/query/account/list_accounts.go
-internal/application/query/account/handler/get_account_handler.go
-internal/application/query/account/handler/get_balance_handler.go
-internal/application/query/account/handler/get_transactions_handler.go
-internal/application/query/account/handler/list_accounts_handler.go
-internal/application/query/account/handler/handler_test.go
-```
-
-**Implementation Steps:**
-1. Define query DTOs
-2. Implement GetAccountHandler:
-   ```go
-   type GetAccountHandler struct {
-       db *gorm.DB
-   }
-
-   func (h *GetAccountHandler) Handle(ctx context.Context, q cqrs.Query) (interface{}, error) {
-       query := q.(GetAccountQuery)
-
-       var account projection.Account
-       err := h.db.First(&account, "id = ?", query.AccountID).Error
-       if err == gorm.ErrRecordNotFound {
-           return nil, errors.NewNotFoundError("Account", query.AccountID)
-       }
-
-       return account, err
-   }
-   ```
-3. Implement GetAccountBalanceHandler (with caching)
-4. Implement GetTransactionsHandler (with pagination)
-5. Implement ListAccountsHandler
-6. Write tests
 
 **Testing:**
 ```go
-func TestGetAccountHandler(t *testing.T) {
-    db := setupTestDB(t)
-    // Seed test data
-    db.Create(&projection.Account{ID: "acc-123", Name: "Test"})
+func TestEventBusPublish(t *testing.T) {
+    bus := NewTenantEventBus("localhost:6379")
+    tenantBus, _ := bus.GetBusForTenant("test-tenant")
 
-    handler := NewGetAccountHandler(db)
-    result, err := handler.Handle(ctx, GetAccountQuery{AccountID: "acc-123"})
-    assert.NoError(t, err)
+    event := eh.NewEvent(
+        "AlertCreated",
+        &AlertCreatedEvent{AlertID: uuid.New()},
+        time.Now(),
+    )
 
-    account := result.(projection.Account)
-    assert.Equal(t, "Test", account.Name)
-}
-
-func TestGetAccountBalanceHandler(t *testing.T) {
-    db := setupTestDB(t)
-    redisClient := setupTestRedis(t)
-
-    // Seed balance
-    db.Create(&projection.AccountBalance{
-        AccountID: "acc-123",
-        Currency:  "USD",
-        Balance:   "100.00",
-    })
-
-    handler := NewGetAccountBalanceHandler(db, redisClient)
-
-    // First call - cache miss
-    result, err := handler.Handle(ctx, GetAccountBalanceQuery{AccountID: "acc-123"})
-    assert.NoError(t, err)
-
-    balances := result.([]projection.AccountBalance)
-    assert.Len(t, balances, 1)
-
-    // Second call - cache hit
-    // Verify cache was used (can mock Redis to verify)
+    err := tenantBus.PublishEvent(context.Background(), event)
+    require.NoError(t, err)
 }
 ```
-
-**Verification Command:**
-```bash
-go test -v ./internal/application/query/account/handler/
-```
-
-**PHP Reference:**
-- Query patterns throughout Laravel controllers
-- `app/Http/Controllers/Api/AccountController.php`
 
 ---
 
-[Continue with remaining Account Domain tasks...]
+### Task 4.5: Projector Infrastructure
 
-## Task 2.6: Account REST API
-
-**Task ID:** P2-ACCOUNT-006
-
-**Description:** Implement REST API endpoints for account operations
-
-**Priority:** Critical
-
-**Estimated Complexity:** M (4-8h)
-
-**Dependencies:**
-- P2-ACCOUNT-003 (Command Handlers)
-- P2-ACCOUNT-005 (Query Handlers)
-- P1-FOUNDATION-006 (CommandBus)
-- P1-FOUNDATION-007 (QueryBus)
-
-**Acceptance Criteria:**
-- [ ] POST /api/v1/accounts - Create account
-- [ ] GET /api/v1/accounts/:id - Get account
-- [ ] GET /api/v1/accounts/:id/balance - Get balance
-- [ ] POST /api/v1/accounts/:id/deposit - Deposit
-- [ ] POST /api/v1/accounts/:id/withdraw - Withdraw
-- [ ] POST /api/v1/transfers - Transfer
-- [ ] POST /api/v1/accounts/:id/freeze - Freeze account
-- [ ] POST /api/v1/accounts/:id/unfreeze - Unfreeze account
-- [ ] GET /api/v1/accounts - List accounts (paginated)
-- [ ] Input validation
-- [ ] Error handling
-- [ ] OpenAPI documentation
-- [ ] Integration tests
-
-**Files to Create:**
-```
-internal/interfaces/rest/handler/account_handler.go
-internal/interfaces/rest/handler/account_handler_test.go
-internal/interfaces/rest/dto/account_request.go
-internal/interfaces/rest/dto/account_response.go
-```
-
-**Implementation Steps:**
-1. Create AccountHandler with injected CommandBus and QueryBus
-2. Implement each endpoint
-3. Add request validation
-4. Add response formatting
-5. Add OpenAPI annotations
-6. Write integration tests
-
-**Testing:**
-```go
-func TestCreateAccountEndpoint(t *testing.T) {
-    // Setup
-    router := setupTestRouter(t)
-
-    // Request
-    body := `{"name":"Test Account","currency":"USD"}`
-    req := httptest.NewRequest("POST", "/api/v1/accounts", strings.NewReader(body))
-    req.Header.Set("Content-Type", "application/json")
-    req.Header.Set("X-Tenant-ID", "tenant-1")
-
-    // Execute
-    w := httptest.NewRecorder()
-    router.ServeHTTP(w, req)
-
-    // Assert
-    assert.Equal(t, http.StatusCreated, w.Code)
-
-    var response map[string]interface{}
-    json.Unmarshal(w.Body.Bytes(), &response)
-    assert.NotEmpty(t, response["id"])
-}
-```
-
-**Verification Command:**
-```bash
-go test -v ./internal/interfaces/rest/handler/
-```
-
-**PHP Reference:**
-- `app/Http/Controllers/Api/AccountController.php`
-- `routes/api.php`
-
----
-
-## Task 2.7: Account Integration Tests
-
-**Task ID:** P2-ACCOUNT-007
-
-**Description:** Write comprehensive integration tests for Account domain
-
+**Task ID:** P4-EVENTHORIZON-005
+**Description:** Build projector system for read model updates
 **Priority:** High
+**Complexity:** M (4-8h)
 
-**Estimated Complexity:** M (4-8h)
-
-**Dependencies:**
-- All previous Account tasks
+**Dependencies:** P4-EVENTHORIZON-004
 
 **Acceptance Criteria:**
-- [ ] End-to-end account creation flow
-- [ ] Deposit/withdraw flow with balance verification
-- [ ] Transfer flow (multi-account)
-- [ ] Freeze/unfreeze flow
-- [ ] Multi-currency support
-- [ ] Concurrency tests (simultaneous withdrawals)
-- [ ] Event replay and reconstitution tests
-- [ ] >80% test coverage
+- [ ] Base projector interface
+- [ ] Event subscription mechanism
+- [ ] Read model updates working
+- [ ] Idempotent event handling
 
-**Files to Create:**
-```
-test/integration/account/account_test.go
-test/integration/account/concurrency_test.go
-test/integration/account/event_sourcing_test.go
-```
+**Implementation:**
+```go
+// pkg/eventhorizon/projector.go
+package eventhorizon
 
-**Implementation Steps:**
-1. Set up integration test infrastructure
-2. Write end-to-end scenarios
-3. Test concurrency scenarios
-4. Test event sourcing features
-5. Run coverage analysis
+import (
+    "context"
+    eh "github.com/looplab/eventhorizon/v2"
+    "gorm.io/gorm"
+)
+
+type Projector interface {
+    ProjectorType() string
+    Project(ctx context.Context, event eh.Event) error
+}
+
+type BaseProjector struct {
+    db *gorm.DB
+}
+
+// Example: Compliance Alert Projector
+type ComplianceAlertProjector struct {
+    BaseProjector
+}
+
+func (p *ComplianceAlertProjector) ProjectorType() string {
+    return "ComplianceAlertProjector"
+}
+
+func (p *ComplianceAlertProjector) Project(ctx context.Context, event eh.Event) error {
+    switch e := event.Data().(type) {
+    case *AlertCreatedEvent:
+        return p.onAlertCreated(ctx, e)
+    case *AlertAssignedEvent:
+        return p.onAlertAssigned(ctx, e)
+    case *AlertResolvedEvent:
+        return p.onAlertResolved(ctx, e)
+    }
+    return nil
+}
+
+func (p *ComplianceAlertProjector) onAlertCreated(ctx context.Context, event *AlertCreatedEvent) error {
+    // Create read model
+    alert := &ComplianceAlertReadModel{
+        ID:          event.AlertID,
+        AlertType:   event.AlertType,
+        Severity:    event.Severity,
+        Status:      "open",
+        Description: event.Description,
+        CreatedAt:   time.Now(),
+    }
+
+    return p.db.WithContext(ctx).Create(alert).Error
+}
+
+func (p *ComplianceAlertProjector) onAlertAssigned(ctx context.Context, event *AlertAssignedEvent) error {
+    return p.db.WithContext(ctx).
+        Model(&ComplianceAlertReadModel{}).
+        Where("id = ?", event.AlertID).
+        Updates(map[string]interface{}{
+            "assigned_to": event.AssignedTo,
+            "status":      "investigating",
+            "updated_at":  time.Now(),
+        }).Error
+}
+
+// Read model (GORM)
+type ComplianceAlertReadModel struct {
+    ID          uuid.UUID `gorm:"type:uuid;primary_key"`
+    AlertType   string
+    Severity    string
+    Status      string
+    Description string
+    AssignedTo  string
+    ResolvedBy  string
+    CreatedAt   time.Time
+    UpdatedAt   time.Time
+}
+```
 
 **Testing:**
 ```go
-func TestAccountE2E(t *testing.T) {
-    // This test runs the entire flow from API -> Command -> Aggregate -> Events -> Projections -> Query
+func TestProjectorUpdatesReadModel(t *testing.T) {
+    db := setupTestDB(t)
+    projector := &ComplianceAlertProjector{BaseProjector{db: db}}
 
-    // 1. Create account via API
-    response := createAccount(t, "Test Account")
-    accountID := response["id"].(string)
-
-    // 2. Verify account was created (query)
-    account := getAccount(t, accountID)
-    assert.Equal(t, "Test Account", account["name"])
-
-    // 3. Deposit funds
-    deposit(t, accountID, "100.00", "USD")
-
-    // 4. Verify balance
-    balance := getBalance(t, accountID)
-    assert.Equal(t, "100.00", balance["USD"])
-
-    // 5. Withdraw funds
-    withdraw(t, accountID, "30.00", "USD")
-
-    // 6. Verify balance
-    balance = getBalance(t, accountID)
-    assert.Equal(t, "70.00", balance["USD"])
-
-    // 7. Verify transaction history
-    transactions := getTransactions(t, accountID)
-    assert.Len(t, transactions, 2)  // 1 deposit + 1 withdrawal
-}
-
-func TestConcurrentWithdrawals(t *testing.T) {
-    // Create account with $100
-    accountID := createAccountWithBalance(t, "100.00", "USD")
-
-    // Attempt 3 concurrent withdrawals of $40 each
-    // Only 2 should succeed, 1 should fail due to insufficient funds
-
-    var wg sync.WaitGroup
-    results := make(chan error, 3)
-
-    for i := 0; i < 3; i++ {
-        wg.Add(1)
-        go func() {
-            defer wg.Done()
-            err := withdraw(t, accountID, "40.00", "USD")
-            results <- err
-        }()
+    event := &AlertCreatedEvent{
+        AlertID:   uuid.New(),
+        AlertType: "test",
+        Severity:  "high",
     }
 
-    wg.Wait()
-    close(results)
+    err := projector.onAlertCreated(context.Background(), event)
+    require.NoError(t, err)
 
-    // Check results
-    successCount := 0
-    failCount := 0
-    for err := range results {
-        if err == nil {
-            successCount++
-        } else {
-            failCount++
-        }
-    }
-
-    assert.Equal(t, 2, successCount)
-    assert.Equal(t, 1, failCount)
-
-    // Verify final balance
-    balance := getBalance(t, accountID)
-    assert.Equal(t, "20.00", balance["USD"])  // $100 - $40 - $40
+    var alert ComplianceAlertReadModel
+    err = db.First(&alert, "id = ?", event.AlertID).Error
+    require.NoError(t, err)
+    assert.Equal(t, "open", alert.Status)
 }
-```
-
-**Verification Command:**
-```bash
-go test -v -tags=integration ./test/integration/account/
 ```
 
 ---
 
-## Task 2.8: Account Internal Testing Tool
+### Task 4.6: Command/Event Handler Base Classes
 
-**Task ID:** P2-ACCOUNT-008
-
-**Description:** Create CLI tool for manual account testing
-
+**Task ID:** P4-EVENTHORIZON-006
+**Description:** Create reusable command and event handler patterns
 **Priority:** Medium
+**Complexity:** M (4-8h)
 
-**Estimated Complexity:** M (4-8h)
-
-**Dependencies:**
-- P2-ACCOUNT-006
+**Dependencies:** P4-EVENTHORIZON-005
 
 **Acceptance Criteria:**
-- [ ] CLI commands for all account operations
-- [ ] Interactive mode
-- [ ] Pretty-printed output
-- [ ] Support for demo data generation
-- [ ] Error display
-- [ ] Help documentation
+- [ ] Command handler interface
+- [ ] Event handler interface
+- [ ] Handler registration system
+- [ ] Middleware support (logging, validation)
 
-**Files to Create:**
+**Implementation:**
+```go
+// pkg/eventhorizon/handlers.go
+package eventhorizon
+
+import (
+    "context"
+    eh "github.com/looplab/eventhorizon/v2"
+)
+
+type CommandHandler interface {
+    HandleCommand(ctx context.Context, cmd eh.Command) error
+}
+
+type EventHandler interface {
+    HandleEvent(ctx context.Context, event eh.Event) error
+}
+
+// Command handler with middleware
+type MiddlewareCommandHandler struct {
+    handler    CommandHandler
+    middleware []CommandMiddleware
+}
+
+type CommandMiddleware func(CommandHandler) CommandHandler
+
+func (h *MiddlewareCommandHandler) HandleCommand(ctx context.Context, cmd eh.Command) error {
+    handler := h.handler
+    for i := len(h.middleware) - 1; i >= 0; i-- {
+        handler = h.middleware[i](handler)
+    }
+    return handler.HandleCommand(ctx, cmd)
+}
+
+// Logging middleware
+func LoggingMiddleware(logger *zap.Logger) CommandMiddleware {
+    return func(next CommandHandler) CommandHandler {
+        return CommandHandlerFunc(func(ctx context.Context, cmd eh.Command) error {
+            logger.Info("handling command",
+                zap.String("command", fmt.Sprintf("%T", cmd)),
+            )
+            return next.HandleCommand(ctx, cmd)
+        })
+    }
+}
 ```
-cmd/cli/commands/account.go
-cmd/cli/commands/account_create.go
-cmd/cli/commands/account_deposit.go
-cmd/cli/commands/account_withdraw.go
-cmd/cli/commands/account_transfer.go
-cmd/cli/commands/account_list.go
+
+---
+
+### Task 4.7: Integration Testing Setup
+
+**Task ID:** P4-EVENTHORIZON-007
+**Description:** Create integration tests for Event Horizon infrastructure
+**Priority:** High
+**Complexity:** M (4-8h)
+
+**Dependencies:** P4-EVENTHORIZON-006
+
+**Acceptance Criteria:**
+- [ ] End-to-end event sourcing test
+- [ ] Aggregate reconstitution from events
+- [ ] Projection rebuild test
+- [ ] Tenant isolation verified
+
+**Testing:**
+```go
+// pkg/eventhorizon/integration_test.go
+func TestEventSourcingEndToEnd(t *testing.T) {
+    // Setup
+    ctx := context.Background()
+    tenantID := "test-tenant"
+
+    store, _ := NewEventStore(ctx, tenantID)
+    bus, _ := NewEventBus(tenantID)
+
+    // Create aggregate
+    alertID := uuid.New()
+    aggregate := &ComplianceAlertAggregate{
+        BaseAggregate: BaseAggregate{ID: alertID},
+    }
+
+    // Execute commands
+    aggregate.HandleCommand(ctx, &CreateAlertCommand{
+        AlertType: "test",
+        Severity:  "high",
+    })
+    aggregate.HandleCommand(ctx, &AssignAlertCommand{
+        AssignedTo: "officer-123",
+    })
+
+    // Save events
+    err := store.Save(ctx, aggregate.Events, aggregate.Version)
+    require.NoError(t, err)
+
+    // Reconstitute from events
+    events, _ := store.Load(ctx, alertID)
+
+    newAggregate := &ComplianceAlertAggregate{
+        BaseAggregate: BaseAggregate{ID: alertID},
+    }
+
+    for _, event := range events {
+        newAggregate.ApplyEvent(ctx, event)
+    }
+
+    assert.Equal(t, "investigating", newAggregate.Status)
+    assert.Equal(t, "officer-123", newAggregate.AssignedTo)
+}
 ```
 
-**Implementation Steps:**
-1. Set up Cobra CLI framework
-2. Implement each command
-3. Add interactive mode
-4. Add demo data generation
-5. Test manually
+---
 
-**Usage Example:**
-```bash
-# Create account
-./cli account create --name "Test Account" --tenant tenant-1
+### Task 4.8: Documentation & Examples
 
-# Deposit
-./cli account deposit --account acc-123 --amount 100.00 --currency USD
+**Task ID:** P4-EVENTHORIZON-008
+**Description:** Document Event Horizon usage patterns and examples
+**Priority:** Medium
+**Complexity:** S (1-3h)
 
-# Withdraw
-./cli account withdraw --account acc-123 --amount 50.00 --currency USD
+**Dependencies:** P4-EVENTHORIZON-007
 
-# Transfer
-./cli account transfer --from acc-123 --to acc-456 --amount 25.00 --currency USD
+**Acceptance Criteria:**
+- [ ] README with Event Horizon setup
+- [ ] Code examples for common patterns
+- [ ] Decision guide (Formance vs Event Horizon)
+- [ ] Migration guide from Laravel Event Sourcing
 
-# List accounts
-./cli account list --tenant tenant-1
+**Documentation:**
+```markdown
+# Event Horizon Setup
 
-# Interactive mode
-./cli account interactive
+## When to Use Event Horizon
+
+Use Event Horizon for:
+- Compliance workflows (alerts, investigations)
+- KYC/AML processes (document verification, risk assessment)
+- Governance (voting, proposals)
+- AI agent decision tracking
+- Audit logs requiring replay capability
+
+Use Formance for:
+- Account balances
+- Payment transactions
+- Exchange trades
+- Lending repayments
+- Treasury movements
+- Stablecoin operations
+
+## Example: Creating an Aggregate
+
+\`\`\`go
+aggregate := ComplianceAlertAggregate.Create(
+    alertType: "suspicious_activity",
+    severity: "high",
+)
+aggregate.Assign("officer-123")
+aggregate.Resolve("false_positive", "officer-123")
+aggregate.Persist()
+\`\`\`
+
+## Event Store Schema
+
+Each tenant gets isolated event tables:
+- `events` - Event stream
+- `snapshots` - Aggregate snapshots
 ```
 
-**Verification:**
-- Manual testing of all commands
-- Verify data in database
-## Phase 5: Exchange Domain (Critical)
+---
+
+
+## Phase 5: Schema-per-Tenant Middleware
+
+**Duration:** Weeks 13-14 (1.5 weeks)
+**Goal:** Implement automatic schema isolation
+**Dependencies:** Phase 0
+
+### Tasks Overview (6 tasks, 48 hours)
+
+- **5.1:** Tenant Context Extraction Middleware (X-Tenant-ID, domain)
+- **5.2:** PostgreSQL Search Path Middleware (SET search_path)
+- **5.3:** Tenant-Scoped Database Connection Pool
+- **5.4:** Request-Level Tenant Context Propagation
+- **5.5:** Cross-Tenant Query Prevention (circuit breaker)
+- **5.6:** Integration Testing (schema isolation verification)
+
+[Detailed tasks to be added]
+
+---
+
+
+## Phase 6: Exchange Domain (Critical)
 
 **Duration:** Weeks 9-11 (3 weeks)
 **Goal:** Implement trading engine with order matching, liquidity pools, and market making
@@ -4946,7 +3925,7 @@ All major Payment components migrated:
 - [x] Phase 1: Foundation (12/12) - 100%
 - [x] Phase 2: Account (20/20) - 100%
 - [x] Phase 3: Payment (13/13) - 100% ✅
-- [x] Phase 5: Exchange (14/14) - 100%
+- [x] Phase 6: Exchange (14/14) - 100%
 - [ ] Phases 4, 6-14: (0/391) - 0%
 
 **Overall Migration Progress:** 66/450 tasks (15%)
@@ -6618,7 +5597,7 @@ All major Compliance components migrated:
 - [x] Phase 2: Account (20/20) - 100%
 - [x] Phase 3: Payment (13/13) - 100%
 - [x] Phase 4: Compliance (20/20) - 100% ✅
-- [x] Phase 5: Exchange (14/14) - 100%
+- [x] Phase 6: Exchange (14/14) - 100%
 - [ ] Phases 6-14: (0/364) - 0%
 
 **Overall Migration Progress:** 86/450 tasks (19%)
@@ -6630,7 +5609,7 @@ All major Compliance components migrated:
 
 ---
 
-# Phase 5: Exchange Domain (Critical)
+# Phase 6: Exchange Domain (Critical)
 
 **Duration:** Weeks 9-11 (3 weeks)
 **Goal:** Implement trading engine with order matching, liquidity pools, and market making
@@ -12087,11 +11066,11 @@ All major PHP Exchange components migrated:
 
 ---
 
-# Phase 6: Stablecoin Domain
+# Phase 7: Stablecoin Domain
 
 **Duration:** Weeks 12-15 (4 weeks)
 **Goal:** Implement algorithmic stablecoin with collateralization, reserve management, and price stability mechanisms
-**Dependencies:** Phase 2 (Account), Phase 3 (Payment), Phase 7 (Treasury)
+**Dependencies:** Phase 2 (Account), Phase 3 (Payment), Phase 8 (Treasury)
 
 **PHP Reference:**
 - `app/Domain/Stablecoin/` (96 files) - Minting, burning, reserves, oracles, collateral
@@ -12720,7 +11699,7 @@ docs/stablecoin/collateral-management.md
 
 ---
 
-# Phase 7: Treasury Domain (18 Tasks)
+# Phase 8: Treasury Domain (18 Tasks)
 
 **Overview:** Implement comprehensive treasury management system supporting portfolio management, asset allocation, yield optimization, liquidity management, cash forecasting, and risk management for financial institutions.
 
@@ -13772,16 +12751,16 @@ All major Treasury components migrated:
 - [x] Phase 2: Account (20/20) - 100%
 - [x] Phase 3: Payment (13/13) - 100%
 - [x] Phase 4: Compliance (20/20) - 100%
-- [x] Phase 5: Exchange (14/14) - 100%
-- [ ] Phase 6: Stablecoin (0/15) - 0%
-- [x] Phase 7: Treasury (18/18) - 100% ✅
+- [x] Phase 6: Exchange (14/14) - 100%
+- [ ] Phase 7: Stablecoin (0/15) - 0%
+- [x] Phase 8: Treasury (18/18) - 100% ✅
 - [ ] Phases 8-14: (0/331) - 0%
 
 **Overall Migration Progress:** 104/450 tasks (23%)
 
 ---
 
-# Phase 8: Lending Domain
+# Phase 9: Lending Domain
 
 **Duration:** Weeks 16-20 (5 weeks)
 **Goal:** Implement P2P lending platform with credit scoring, loan origination, and collection management
@@ -14305,7 +13284,7 @@ docs/lending/credit-scoring.md
 
 ---
 
-# Phase 9: Wallet/Blockchain Domain (Critical)
+# Phase 10: Wallet/Blockchain Domain (Critical)
 
 **Duration:** Weeks 17-20 (4 weeks)
 **Goal:** Implement blockchain wallet management with HD wallets, multi-chain support, transaction signing, and key management
@@ -17237,7 +16216,7 @@ docs/wallet/troubleshooting.md
 
 ---
 
-## Phase 9 Summary: Wallet/Blockchain Domain
+## Phase 10 Summary: Wallet/Blockchain Domain
 
 **Total Tasks:** 15
 **Total Estimated Hours:** 194 hours
@@ -17337,22 +16316,22 @@ All major Wallet components migrated:
 - [x] Phase 2: Account (20/20) - 100%
 - [x] Phase 3: Payment (13/13) - 100%
 - [x] Phase 4: Compliance (20/20) - 100%
-- [x] Phase 5: Exchange (14/14) - 100%
-- [ ] Phase 6: Stablecoin (0/15) - 0%
-- [x] Phase 7: Treasury (18/18) - 100% ✅
-- [ ] Phase 8: Lending (0/20) - 0%
-- [x] Phase 9: Wallet/Blockchain (15/15) - 100% ✅
+- [x] Phase 6: Exchange (14/14) - 100%
+- [ ] Phase 7: Stablecoin (0/15) - 0%
+- [x] Phase 8: Treasury (18/18) - 100% ✅
+- [ ] Phase 9: Lending (0/20) - 0%
+- [x] Phase 10: Wallet/Blockchain (15/15) - 100% ✅
 - [ ] Phases 10-14: (0/311) - 0%
 
 **Overall Migration Progress:** 119/450 tasks (26%)
 
 ---
 
-# Phase 10: AI Domain
+# Phase 11: AI Domain
 
 **Duration:** Weeks 21-24 (4 weeks)
 **Goal:** Implement AI-powered financial insights, multi-agent coordination, and MCP integration
-**Dependencies:** Phase 2 (Account), Phase 5 (Exchange), Phase 7 (Treasury)
+**Dependencies:** Phase 2 (Account), Phase 6 (Exchange), Phase 8 (Treasury)
 
 **PHP Reference:**
 - `app/Domain/AI/` (75 files) - AI agents, conversations, MCP, multi-agent coordination
@@ -17908,11 +16887,11 @@ docs/ai/mcp-tools.md
 
 ---
 
-# Phase 11: CGO & Governance Domain
+# Phase 12: CGO & Governance Domain
 
 **Duration:** Weeks 32-36 (5 weeks)
 **Goal:** Implement Continuous Growth Offering (CGO) investment platform and DAO governance system
-**Dependencies:** Phase 2 (Account), Phase 3 (Payment), Phase 6 (Stablecoin)
+**Dependencies:** Phase 2 (Account), Phase 3 (Payment), Phase 7 (Stablecoin)
 
 **PHP Reference:**
 - `app/Domain/Cgo/` (45 files) - Investment rounds, payment processing, refunds
@@ -19072,7 +18051,7 @@ docs/governance/voting-strategies.md
 
 ---
 
-# Phase 11 Summary: CGO & Governance
+# Phase 12 Summary: CGO & Governance
 
 **Total Tasks:** 15
 **Total Estimated Hours:** 184 hours
@@ -19145,7 +18124,7 @@ All major CGO & Governance components migrated:
 
 ---
 
-# Phase 12: Banking & Fraud Domain
+# Phase 13: Banking & Fraud Domain
 
 **Duration:** Weeks 21-24 (4 weeks)
 **Goal:** Implement multi-bank integration framework and ML-based fraud detection system
@@ -19609,7 +18588,7 @@ test/performance/fraud_engine_benchmark_test.go
 
 ---
 
-# Phase 13: Monitoring & Performance Domain
+# Phase 14: Monitoring & Performance Domain
 
 **Duration:** Weeks 25-27 (3 weeks)
 **Goal:** Implement comprehensive monitoring, metrics, and performance tracking
@@ -19934,7 +18913,7 @@ test/performance/metrics_benchmark_test.go
 
 ---
 
-# Phase 14: Supporting Domains
+# Phase 15: Supporting Domains
 
 **Duration:** Weeks 28-31 (4 weeks)
 **Goal:** Implement supporting domains (AI, Governance, Asset, Regulatory, etc.)
@@ -20223,7 +19202,7 @@ test/integration/asset_test.go
 
 ---
 
-## Phase 12 Summary: Banking & Fraud
+## Phase 13 Summary: Banking & Fraud
 
 **Total Tasks:** 10
 **Total Hours:** 124 hours
@@ -20238,7 +19217,7 @@ test/integration/asset_test.go
 
 ---
 
-## Phase 13 Summary: Monitoring & Performance
+## Phase 14 Summary: Monitoring & Performance
 
 **Total Tasks:** 8
 **Total Hours:** 92 hours
@@ -20253,7 +19232,7 @@ test/integration/asset_test.go
 
 ---
 
-## Phase 14 Summary: Supporting Domains
+## Phase 15 Summary: Supporting Domains
 
 **Total Tasks:** 9
 **Total Hours:** 102 hours
