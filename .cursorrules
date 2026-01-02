@@ -1,56 +1,76 @@
-# FinAegis Golang Fintech Platform - Cursor AI Rules (Cell-Based Architecture)
+# FinAegis Golang Fintech Platform - Cursor AI Rules (Hybrid Architecture)
 
 > **Complete development guidelines for building Cell-Based, multi-tenant fintech platform in Go**
 >
 > Project: PHP/Laravel → Golang Migration
-> Architecture: Cell-Based (Shared-Nothing) + Ory Stack + Formance + Temporal
-> Total Tasks: 174 atomic tasks across 15 domains
+> Architecture: Cell-Based (Shared-Nothing) + Ory Stack + **HYBRID (Formance + Event Horizon)** + Temporal
+> Total Tasks: 191 atomic tasks across 16 phases
 
 ---
 
-## 🚨 CRITICAL: Architectural Changes (2026-01-01)
+## 🚨 CRITICAL: Hybrid Event Sourcing Architecture (2026-01-02)
 
-**PREVIOUS:** Event Horizon + CQRS + Column-based multi-tenancy
-**CURRENT:** Formance Ledger/Wallets + Ory Stack + Schema-per-tenant
+**PREVIOUS:** Formance-only approach
+**CURRENT:** Hybrid (Formance + Event Horizon) based on domain requirements
 
-### **New Architecture Overview**
+### **🔄 Hybrid Strategy**
+
+**Use TWO complementary systems:**
+
+| Domain Class | Technology | Use Cases |
+|--------------|------------|-----------|
+| **Class A - Financial** | **Formance Ledger + Wallets** | Account balances, Payment transactions, Exchange trades, Lending repayments, Treasury movements, Stablecoin operations |
+| **Class B - Non-Financial** | **Event Horizon (Event Sourcing)** | Compliance alerts, KYC verification, AML monitoring, Fraud detection, Governance votes, AI agent decisions, Audit logs |
+
+### **Architecture Overview**
 
 **Cell-Based Multi-Tenancy (Shared-Nothing):**
 - Control Plane: Tenant provisioning, routing (NO customer data access)
-- Tenant Plane: Isolated per-tenant silos (dedicated schema, Formance instance, Kratos realm)
+- Tenant Plane: Isolated per-tenant silos (dedicated schema, Formance instance, Kratos realm, Event Horizon event store)
 
-**Technology Stack Changes:**
-| Old | New | Why |
-|-----|-----|-----|
-| Event Horizon | Formance Ledger | Purpose-built immutable ledger |
-| Custom Wallets | Formance Wallets | Multi-asset, battle-tested |
-| Custom Auth/JWT | Ory Kratos | MFA, social login, passwordless |
-| Custom RBAC | Ory Keto (ReBAC) | Relationship-based, Google Zanzibar |
-| Custom Gateway | Ory Oathkeeper | Zero-trust, domain routing |
-| tenant_id column | Schema-per-tenant | Physical isolation |
+**Technology Stack:**
+| Component | Solution | Scope |
+|-----------|----------|-------|
+| Identity | Ory Kratos | Tenant-scoped realms |
+| Authorization | Ory Keto | ReBAC (Relationship-Based Access Control) |
+| Gateway | Ory Oathkeeper | Zero-trust, domain routing |
+| **Financial Ledger** | **Formance Ledger** | **Double-entry for financial transactions** |
+| **Financial Wallets** | **Formance Wallets** | **Multi-asset balance management** |
+| **Event Sourcing** | **Event Horizon** | **Non-financial workflows & compliance** |
+| Workflows | Temporal | Sagas, compensation, tenant provisioning |
+| Database | PostgreSQL 16 | Schema-per-tenant isolation |
+| Event Store | PostgreSQL 16 | Tenant-scoped event tables |
+| Event Bus | Redis 7 | Tenant-scoped streams |
 
-**Critical Directives:**
-1. ✅ Use Formance APIs for ALL wallet operations (NO balance in Postgres)
-2. ✅ Use Ory Kratos UUIDs as FK (NO password storage)
-3. ✅ Use Ory Keto for ALL permissions (two-layer fallback)
-4. ✅ Schema isolation via middleware (SET search_path per request)
-5. ✅ Control Plane NEVER accesses Tenant Plane data
+### **Critical Directives**
+
+1. ✅ **Hybrid Decision**: Financial operations → Formance, Non-financial workflows → Event Horizon
+2. ✅ Use Formance APIs for ALL financial wallet operations (NO balance in Postgres)
+3. ✅ Use Event Horizon aggregates for compliance, KYC, governance, AI workflows
+4. ✅ Use Ory Kratos UUIDs as FK (NO password storage)
+5. ✅ Use Ory Keto for ALL permissions (two-layer fallback)
+6. ✅ Schema isolation via middleware (SET search_path per request)
+7. ✅ Control Plane NEVER accesses Tenant Plane data
+8. ✅ Event store tables in each tenant schema (for Event Horizon domains)
 
 ---
 
-## 🎯 Project Overview (Updated)
+## 🎯 Project Overview (Hybrid Architecture)
 
-You are building a **production-grade Cell-Based fintech platform** in Golang with:
+You are building a **production-grade Cell-Based fintech platform** in Golang with **HYBRID event sourcing**:
 
-- **Identity**: Ory Kratos (tenant-scoped realms)
-- **Authorization**: Ory Keto (ReBAC with relationship tuples)
-- **Gateway**: Ory Oathkeeper (domain-based routing)
-- **Ledger**: Formance Ledger (immutable double-entry log)
-- **Wallets**: Formance Wallets (multi-asset balance management)
-- **Workflows**: Temporal (tenant provisioning, sagas)
-- **Database**: PostgreSQL 16 (schema-per-tenant isolation)
+**Infrastructure:**
+- **Identity**: Ory Kratos (tenant-scoped realms, MFA, passwordless)
+- **Authorization**: Ory Keto (ReBAC with relationship tuples, two-layer fallback)
+- **Gateway**: Ory Oathkeeper (domain-based routing, zero-trust)
 - **Multi-tenancy**: Strict isolation (Control Plane + Tenant Plane)
+- **Database**: PostgreSQL 16 (schema-per-tenant isolation)
+- **Workflows**: Temporal (tenant provisioning, sagas, compensation)
 - **Observability**: OpenTelemetry + Prometheus + Jaeger
+
+**Hybrid Event Sourcing:**
+- **Financial Domains**: Formance Ledger + Wallets (Account, Payment, Exchange, Treasury, Lending, Stablecoin)
+- **Non-Financial Domains**: Event Horizon (Compliance, KYC, Governance, AI, Audit)
 
 ### Data Hierarchy
 
@@ -59,54 +79,41 @@ Tenant (B2B Customer - The Cell)
   └─ Account (Logical Container - B2C or B2B)
       ├─ Wallet 1 (Multi-Asset: USD, EUR, BTC via Formance)
       ├─ Wallet 2 (Multi-Asset)
+      ├─ Compliance Status (Event Horizon aggregates)
+      ├─ KYC Verification (Event Horizon workflow)
       └─ Users (Members with Ory Keto permissions)
           ├─ User A (OWNER / ADMIN)
           ├─ User B (MEMBER)
           └─ User C (VIEWER)
 ```
 
-**Key Principle**: Users and Wallets NEVER directly linked - always through Account.
+**Key Principles:**
+- Users and Wallets NEVER directly linked - always through Account
+- Financial operations use Formance for accuracy
+- Compliance/workflow operations use Event Horizon for auditability
+- All entities tenant-scoped (no global tables)
 
----
+### Core Domains (with Technology Mapping)
 
-# FinAegis Golang Fintech Platform - Cursor AI Rules
+**Class A - Financial (Formance-Based):**
+1. **Account** - Multi-currency accounts, balance management via Formance Wallets
+2. **Payment** - Deposits, withdrawals, transfers using Formance Ledger (Stripe, Open Banking, ISO20022)
+3. **Exchange** - Trading engine, order matching, liquidity pools with Formance double-entry ledger
+4. **Treasury** - Portfolio management, cash allocation, yield optimization via Formance
+5. **Lending** - Loan disbursements, repayments, interest calculation using Formance Ledger
+6. **Stablecoin** - Collateralized stablecoin, minting/burning with Formance reserve management
 
-> **Complete development guidelines for building event-sourced, CQRS-based fintech platform in Go**
->
-> Project: PHP/Laravel → Golang Migration
-> Architecture: DDD + CQRS + Event Sourcing + Hexagonal
-> Total Tasks: 180 atomic tasks across 15 domains
+**Class B - Non-Financial (Event Horizon-Based):**
+7. **Compliance** - Alert aggregates, KYC/AML workflows, transaction monitoring with event replay
+8. **Governance** - Voting workflows, proposal management, investment rounds using event sourcing
+9. **AI Agents** - AI decision tracking, agent orchestration, conversation audit trails
 
----
+**Hybrid (Both Technologies):**
+10. **Wallet/Blockchain** - Crypto operations (Formance) + verification workflows (Event Horizon)
 
-## 🎯 Project Overview
-
-You are building a **production-grade fintech platform** in Golang with:
-
-- **Event Sourcing** using Event Horizon framework
-- **CQRS** pattern with separate read/write models
-- **Domain-Driven Design** with bounded contexts (15 domains)
-- **Hexagonal Architecture** (Ports & Adapters)
-- **Temporal Workflows** for complex sagas
-- **Multi-tenancy** and **multi-currency** support
-- **Comprehensive observability** (OpenTelemetry, Prometheus, Jaeger)
-
-### Core Domains
-
-1. **Account** - Multi-currency accounts, balance management
-2. **Payment** - Deposits, withdrawals, transfers (Stripe, Open Banking, ISO20022)
-3. **Compliance** - KYC/AML, transaction monitoring, sanctions screening
-4. **Exchange** - Trading engine, order matching, liquidity pools
-5. **Stablecoin** - Collateralized stablecoin, minting/burning
-6. **Treasury** - Portfolio management, DeFi integration, yield optimization
-7. **Lending** - P2P loans, credit scoring, repayment tracking
-8. **Wallet** - HD wallets (BIP32/39/44), multi-chain support
-9. **AI** - Multi-provider LLM, financial analysis, agent coordination
-10. **CGO** - Continuous Growth Offering, investment tracking
-11. **Governance** - DAO voting, proposal management
-12. **Banking** - Core banking operations, fraud detection
-13. **Monitoring** - Performance metrics, alerting
-14. **Supporting** - Notifications, webhooks, audit logs
+**Supporting Domains:**
+11. **Monitoring** - Performance metrics, alerting, observability
+12. **Supporting** - Notifications, webhooks, audit logs
 
 ---
 
@@ -139,10 +146,12 @@ finaegis-go/
 │   │   ├── handler/           # Command/query handlers
 │   │   └── service/           # Application services
 │   ├── infrastructure/         # Infrastructure layer
-│   │   ├── eventstore/        # Event Horizon implementation
-│   │   ├── persistence/       # GORM repositories
+│   │   ├── eventstore/        # Event Horizon implementation (non-financial)
+│   │   ├── formance/          # Formance SDK clients (financial)
+│   │   ├── ory/               # Ory SDK clients (Kratos, Keto, Oathkeeper)
+│   │   ├── persistence/       # GORM repositories (read models)
 │   │   ├── http/              # Gin HTTP handlers
-│   │   ├── temporal/          # Temporal client
+│   │   ├── temporal/          # Temporal client (workflows)
 │   │   └── external/          # External API clients
 │   └── api/                   # API contracts (OpenAPI)
 ├── pkg/                        # Public libraries
