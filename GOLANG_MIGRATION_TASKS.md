@@ -1040,6 +1040,365 @@ func TestTenantService_GetByDomain(t *testing.T) {
 
 
 
+
+---
+
+### Task 1.2: Tenant Repository Implementation
+
+**Task ID:** P1-CONTROL-002
+**Description:** Implement PostgreSQL repository for tenant data persistence
+**Priority:** Critical
+**Complexity:** 8h
+
+**Dependencies:** P1-CONTROL-001
+
+**Acceptance Criteria:**
+- [ ] GORM repository with tenant-scoped queries
+- [ ] Optimistic locking for concurrent updates
+- [ ] Efficient domain lookup with indexing
+- [ ] Soft delete support
+- [ ] Migration scripts for tenant table
+
+**Files to Create:**
+```
+control-plane/internal/tenant/repository.go
+migrations/control_plane/001_create_tenants_table.sql
+```
+
+**Implementation:**
+```go
+type Repository struct {
+    db *gorm.DB
+}
+
+func (r *Repository) Create(ctx context.Context, tenant *Tenant) error {
+    return r.db.WithContext(ctx).Create(tenant).Error
+}
+
+func (r *Repository) FindByDomain(ctx context.Context, domain string) (*Tenant, error) {
+    var tenant Tenant
+    err := r.db.WithContext(ctx).Where("domain = ?", domain).First(&tenant).Error
+    return &tenant, err
+}
+```
+
+**Testing:**
+```bash
+go test ./control-plane/internal/tenant -v -run TestRepository
+```
+
+---
+
+### Task 1.3: Tenant Service Layer
+
+**Task ID:** P1-CONTROL-003
+**Description:** Business logic layer for tenant operations
+**Priority:** High
+**Complexity:** 12h
+
+**Dependencies:** P1-CONTROL-002
+
+**Acceptance Criteria:**
+- [ ] CreateTenant with slug generation
+- [ ] ActivateTenant, SuspendTenant operations
+- [ ] Domain availability check
+- [ ] Tenant validation rules
+- [ ] Event publishing for tenant lifecycle
+
+**Files to Create:**
+```
+control-plane/internal/tenant/service.go
+control-plane/internal/tenant/service_test.go
+```
+
+**Implementation:**
+```go
+func (s *Service) CreateTenant(ctx context.Context, input CreateInput) (*Tenant, error) {
+    slug := generateSlug(input.Name)
+    tenant := &Tenant{
+        Name:       input.Name,
+        Slug:       slug,
+        Domain:     input.Domain,
+        SchemaName: fmt.Sprintf("tenant_%s", slug),
+        Status:     StatusProvisioning,
+    }
+    if err := s.repo.Create(ctx, tenant); err != nil {
+        return nil, err
+    }
+    s.eventBus.Publish("tenant.created", tenant)
+    return tenant, nil
+}
+```
+
+---
+
+### Task 1.4: Tenant Metrics & Monitoring
+
+**Task ID:** P1-CONTROL-004
+**Description:** Prometheus metrics for tenant lifecycle monitoring
+**Priority:** Medium
+**Complexity:** 10h
+
+**Dependencies:** P1-CONTROL-003, P0-INFRA-007
+
+**Acceptance Criteria:**
+- [ ] Tenant count by status gauge
+- [ ] Provisioning duration histogram
+- [ ] Tenant operations counter
+- [ ] Grafana dashboard for tenant metrics
+- [ ] Alerts for provisioning failures
+
+**Files to Create:**
+```
+control-plane/internal/tenant/metrics.go
+deployments/docker/grafana/dashboards/tenant-metrics.json
+```
+
+**Implementation:**
+```go
+var (
+    tenantCount = promauto.NewGaugeVec(
+        prometheus.GaugeOpts{
+            Name: "tenant_count_by_status",
+            Help: "Number of tenants by status",
+        },
+        []string{"status"},
+    )
+
+    provisioningDuration = promauto.NewHistogram(
+        prometheus.HistogramOpts{
+            Name: "tenant_provisioning_duration_seconds",
+            Buckets: []float64{1, 5, 10, 30, 60, 120, 300},
+        },
+    )
+)
+```
+
+---
+
+### Task 1.5: Tenant Billing Integration
+
+**Task ID:** P1-CONTROL-005
+**Description:** Integrate billing system for tenant subscription management
+**Priority:** Medium
+**Complexity:** 12h
+
+**Dependencies:** P1-CONTROL-003
+
+**Acceptance Criteria:**
+- [ ] Billing provider interface (Stripe/custom)
+- [ ] Subscription creation on tenant activation
+- [ ] Usage tracking integration
+- [ ] Webhook handling for payment events
+- [ ] Billing status sync with tenant status
+
+**Files to Create:**
+```
+control-plane/internal/billing/
+├── provider.go
+├── stripe_adapter.go
+└── webhook_handler.go
+```
+
+**Implementation:**
+```go
+type BillingProvider interface {
+    CreateSubscription(tenantID string, plan string) (*Subscription, error)
+    CancelSubscription(subscriptionID string) error
+    GetUsage(tenantID string) (*Usage, error)
+}
+
+type StripeAdapter struct {
+    client *stripe.Client
+}
+
+func (a *StripeAdapter) CreateSubscription(tenantID, plan string) (*Subscription, error) {
+    params := &stripe.SubscriptionParams{
+        Customer: stripe.String(tenantID),
+        Items: []*stripe.SubscriptionItemsParams{{Price: stripe.String(plan)}},
+    }
+    sub, err := subscription.New(params)
+    return &Subscription{ID: sub.ID, Status: string(sub.Status)}, err
+}
+```
+
+---
+
+### Task 1.6: Tenant Lifecycle Workflows
+
+**Task ID:** P1-CONTROL-006
+**Description:** Temporal workflows for tenant suspend/resume/delete operations
+**Priority:** High
+**Complexity:** 10h
+
+**Dependencies:** P1-CONTROL-003, P0-INFRA-005
+
+**Acceptance Criteria:**
+- [ ] SuspendTenantWorkflow with data retention
+- [ ] ResumeTenantWorkflow with validation
+- [ ] DeleteTenantWorkflow with cleanup
+- [ ] Rollback/compensation logic
+- [ ] Workflow state persistence
+
+**Files to Create:**
+```
+control-plane/internal/workflows/tenant/
+├── suspend_workflow.go
+├── resume_workflow.go
+└── delete_workflow.go
+```
+
+**Implementation:**
+```go
+func SuspendTenantWorkflow(ctx workflow.Context, tenantID string) error {
+    ao := workflow.ActivityOptions{StartToCloseTimeout: 5 * time.Minute}
+    ctx = workflow.WithActivityOptions(ctx, ao)
+
+    // Step 1: Mark tenant as suspended
+    if err := workflow.ExecuteActivity(ctx, UpdateTenantStatus, tenantID, "suspended").Get(ctx, nil); err != nil {
+        return err
+    }
+
+    // Step 2: Disable API access
+    if err := workflow.ExecuteActivity(ctx, RevokeAPIAccess, tenantID).Get(ctx, nil); err != nil {
+        return err
+    }
+
+    // Step 3: Notify tenant
+    workflow.ExecuteActivity(ctx, SendSuspensionNotification, tenantID).Get(ctx, nil)
+
+    return nil
+}
+```
+
+---
+
+### Task 1.7: Tenant Migration Tools
+
+**Task ID:** P1-CONTROL-007
+**Description:** CLI tools for tenant data migration and maintenance
+**Priority:** Medium
+**Complexity:** 14h
+
+**Dependencies:** P1-CONTROL-003
+
+**Acceptance Criteria:**
+- [ ] Tenant export tool (schema + data)
+- [ ] Tenant import tool with validation
+- [ ] Schema migration runner
+- [ ] Data integrity verification
+- [ ] Rollback capability
+
+**Files to Create:**
+```
+control-plane/cmd/tenant-cli/
+├── main.go
+├── export.go
+├── import.go
+└── migrate.go
+```
+
+**Implementation:**
+```go
+// CLI command structure
+func main() {
+    app := &cli.App{
+        Name: "tenant-cli",
+        Commands: []*cli.Command{
+            {
+                Name: "export",
+                Action: exportTenant,
+                Flags: []cli.Flag{
+                    &cli.StringFlag{Name: "tenant-id", Required: true},
+                    &cli.StringFlag{Name: "output", Value: "export.tar.gz"},
+                },
+            },
+            {
+                Name: "import",
+                Action: importTenant,
+            },
+            {
+                Name: "migrate",
+                Action: migrateTenant,
+            },
+        },
+    }
+    app.Run(os.Args)
+}
+
+func exportTenant(c *cli.Context) error {
+    tenantID := c.String("tenant-id")
+    // Dump schema and data to archive
+    return createExportArchive(tenantID, c.String("output"))
+}
+```
+
+---
+
+### Task 1.8: Control Plane Integration Testing
+
+**Task ID:** P1-CONTROL-008
+**Description:** End-to-end integration tests for control plane
+**Priority:** High
+**Complexity:** 10h
+
+**Dependencies:** P1-CONTROL-001 through P1-CONTROL-007
+
+**Acceptance Criteria:**
+- [ ] Full tenant lifecycle test (create → activate → suspend → delete)
+- [ ] Concurrent tenant creation test
+- [ ] Billing integration test with mocks
+- [ ] Workflow execution tests
+- [ ] API endpoint integration tests
+
+**Files to Create:**
+```
+control-plane/tests/integration/
+├── tenant_lifecycle_test.go
+├── billing_test.go
+├── workflow_test.go
+└── api_test.go
+```
+
+**Implementation:**
+```go
+func TestTenantLifecycle_E2E(t *testing.T) {
+    ctx := context.Background()
+    containers := testutil.SetupTestContainers(t)
+
+    // Create tenant
+    tenant, err := service.CreateTenant(ctx, CreateInput{
+        Name: "Test Corp", Domain: "test.example.com",
+    })
+    require.NoError(t, err)
+    assert.Equal(t, StatusProvisioning, tenant.Status)
+
+    // Activate tenant
+    err = service.ActivateTenant(ctx, tenant.ID)
+    require.NoError(t, err)
+
+    // Verify subscription created
+    sub, err := billingService.GetSubscription(tenant.ID)
+    require.NoError(t, err)
+    assert.Equal(t, "active", sub.Status)
+
+    // Suspend tenant
+    err = workflowClient.ExecuteWorkflow(ctx, SuspendTenantWorkflow, tenant.ID)
+    require.NoError(t, err)
+
+    // Delete tenant
+    err = workflowClient.ExecuteWorkflow(ctx, DeleteTenantWorkflow, tenant.ID)
+    require.NoError(t, err)
+}
+```
+
+**Testing:**
+```bash
+go test -tags=integration ./control-plane/tests/integration/... -v
+```
+
+---
+
 ## Phase 2: Ory Stack Integration
 
 **Duration:** Weeks 5-7 (3 weeks)
