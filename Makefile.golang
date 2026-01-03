@@ -1,0 +1,424 @@
+# FinAegis Golang Fintech Platform - Makefile
+# Comprehensive build, test, and deployment automation
+
+.PHONY: help
+help: ## Show this help message
+	@echo 'Usage: make [target]'
+	@echo ''
+	@echo 'Available targets:'
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+
+# ============================================================================
+# Development
+# ============================================================================
+
+.PHONY: dev
+dev: ## Start development environment (Docker Compose)
+	docker-compose up -d
+	@echo "✅ Development environment started"
+	@echo "   PostgreSQL: localhost:5432"
+	@echo "   Redis: localhost:6379"
+	@echo "   Kafka: localhost:9092"
+	@echo "   Jaeger UI: http://localhost:16686"
+	@echo "   Prometheus: http://localhost:9090"
+
+.PHONY: dev-down
+dev-down: ## Stop development environment
+	docker-compose down
+	@echo "✅ Development environment stopped"
+
+.PHONY: dev-clean
+dev-clean: ## Stop and clean development environment (removes volumes)
+	docker-compose down -v
+	@echo "✅ Development environment cleaned"
+
+.PHONY: run-api
+run-api: ## Run API server locally
+	go run cmd/api-server/main.go
+
+.PHONY: run-cli
+run-cli: ## Run CLI tool
+	go run cmd/cli/main.go
+
+.PHONY: run-worker
+run-worker: ## Run background worker
+	go run cmd/worker/main.go
+
+.PHONY: watch
+watch: ## Run with hot reload (requires air)
+	air
+
+# ============================================================================
+# Dependencies
+# ============================================================================
+
+.PHONY: deps
+deps: ## Download Go module dependencies
+	go mod download
+	go mod verify
+	@echo "✅ Dependencies downloaded"
+
+.PHONY: deps-upgrade
+deps-upgrade: ## Upgrade all dependencies
+	go get -u ./...
+	go mod tidy
+	@echo "✅ Dependencies upgraded"
+
+.PHONY: install-tools
+install-tools: ## Install development tools
+	@echo "Installing tools..."
+	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	go install github.com/securego/gosec/v2/cmd/gosec@latest
+	go install golang.org/x/vuln/cmd/govulncheck@latest
+	go install github.com/pressly/goose/v3/cmd/goose@latest
+	go install github.com/cosmtrek/air@latest
+	go install go.uber.org/mock/mockgen@latest
+	go install github.com/swaggo/swag/cmd/swag@latest
+	@echo "✅ Tools installed"
+
+# ============================================================================
+# Build
+# ============================================================================
+
+.PHONY: build
+build: ## Build all binaries
+	@echo "Building binaries..."
+	go build -o bin/api-server ./cmd/api-server
+	go build -o bin/cli ./cmd/cli
+	go build -o bin/worker ./cmd/worker
+	go build -o bin/migrate ./cmd/migrate
+	@echo "✅ Binaries built in ./bin/"
+
+.PHONY: build-linux
+build-linux: ## Build Linux binaries
+	@echo "Building Linux binaries..."
+	GOOS=linux GOARCH=amd64 go build -o bin/linux/api-server ./cmd/api-server
+	GOOS=linux GOARCH=amd64 go build -o bin/linux/cli ./cmd/cli
+	GOOS=linux GOARCH=amd64 go build -o bin/linux/worker ./cmd/worker
+	@echo "✅ Linux binaries built in ./bin/linux/"
+
+.PHONY: build-docker
+build-docker: ## Build Docker images
+	docker-compose build
+	@echo "✅ Docker images built"
+
+# ============================================================================
+# Testing
+# ============================================================================
+
+.PHONY: test
+test: ## Run all tests
+	go test -v ./...
+
+.PHONY: test-short
+test-short: ## Run short tests (skip long-running tests)
+	go test -short -v ./...
+
+.PHONY: test-cover
+test-cover: ## Run tests with coverage
+	go test -cover ./...
+
+.PHONY: test-cover-html
+test-cover-html: ## Generate HTML coverage report
+	go test -coverprofile=coverage.out ./...
+	go tool cover -html=coverage.out -o coverage.html
+	@echo "✅ Coverage report: coverage.html"
+
+.PHONY: test-race
+test-race: ## Run tests with race detector
+	go test -race ./...
+
+.PHONY: test-integration
+test-integration: ## Run integration tests
+	go test -tags=integration -v ./test/integration/...
+
+.PHONY: test-e2e
+test-e2e: ## Run end-to-end tests
+	go test -tags=e2e -v ./test/e2e/...
+
+.PHONY: test-benchmark
+test-benchmark: ## Run benchmark tests
+	go test -bench=. -benchmem ./...
+
+.PHONY: test-domain
+test-domain: ## Run domain layer tests only
+	go test -v ./internal/domain/...
+
+.PHONY: test-watch
+test-watch: ## Run tests in watch mode (requires gotestsum)
+	gotestsum --watch
+
+# ============================================================================
+# Code Quality
+# ============================================================================
+
+.PHONY: lint
+lint: ## Run linter
+	golangci-lint run
+
+.PHONY: lint-fix
+lint-fix: ## Run linter with auto-fix
+	golangci-lint run --fix
+
+.PHONY: fmt
+fmt: ## Format code
+	gofmt -s -w .
+	goimports -w .
+
+.PHONY: vet
+vet: ## Run go vet
+	go vet ./...
+
+.PHONY: sec
+sec: ## Run security scanner
+	gosec -quiet ./...
+
+.PHONY: vuln
+vuln: ## Check for vulnerabilities
+	govulncheck ./...
+
+.PHONY: quality
+quality: fmt vet lint sec vuln ## Run all quality checks
+	@echo "✅ All quality checks passed"
+
+# ============================================================================
+# Database
+# ============================================================================
+
+.PHONY: migrate-up
+migrate-up: ## Run database migrations
+	goose -dir migrations postgres "$(DATABASE_URL)" up
+	@echo "✅ Migrations applied"
+
+.PHONY: migrate-down
+migrate-down: ## Rollback last migration
+	goose -dir migrations postgres "$(DATABASE_URL)" down
+	@echo "✅ Migration rolled back"
+
+.PHONY: migrate-reset
+migrate-reset: ## Reset database (down all + up all)
+	goose -dir migrations postgres "$(DATABASE_URL)" reset
+	goose -dir migrations postgres "$(DATABASE_URL)" up
+	@echo "✅ Database reset"
+
+.PHONY: migrate-status
+migrate-status: ## Show migration status
+	goose -dir migrations postgres "$(DATABASE_URL)" status
+
+.PHONY: migrate-create
+migrate-create: ## Create new migration (usage: make migrate-create NAME=create_accounts)
+	goose -dir migrations create $(NAME) sql
+	@echo "✅ Migration created"
+
+.PHONY: db-seed
+db-seed: ## Seed database with synthetic data
+	go run scripts/seed/main.go --accounts 100 --transactions 1000
+	@echo "✅ Database seeded"
+
+.PHONY: db-reset-seed
+db-reset-seed: migrate-reset db-seed ## Reset database and seed
+	@echo "✅ Database reset and seeded"
+
+# ============================================================================
+# Mocks
+# ============================================================================
+
+.PHONY: mocks
+mocks: ## Generate mocks for interfaces
+	@echo "Generating mocks..."
+	go generate ./...
+	@echo "✅ Mocks generated"
+
+# ============================================================================
+# Documentation
+# ============================================================================
+
+.PHONY: docs
+docs: ## Generate API documentation (Swagger)
+	swag init -g cmd/api-server/main.go
+	@echo "✅ API docs generated"
+
+.PHONY: docs-serve
+docs-serve: ## Serve API documentation
+	@echo "Swagger UI available at http://localhost:8080/swagger/index.html"
+	make run-api
+
+# ============================================================================
+# Monitoring
+# ============================================================================
+
+.PHONY: metrics
+metrics: ## View Prometheus metrics
+	@echo "Opening Prometheus UI..."
+	open http://localhost:9090
+
+.PHONY: traces
+traces: ## View Jaeger traces
+	@echo "Opening Jaeger UI..."
+	open http://localhost:16686
+
+.PHONY: logs
+logs: ## Follow docker-compose logs
+	docker-compose logs -f
+
+.PHONY: logs-api
+logs-api: ## Follow API server logs
+	docker-compose logs -f api-server
+
+# ============================================================================
+# Pre-commit
+# ============================================================================
+
+.PHONY: pre-commit
+pre-commit: fmt vet lint test-short ## Run pre-commit checks (fast)
+	@echo "✅ Pre-commit checks passed"
+
+.PHONY: pre-push
+pre-push: quality test test-race ## Run pre-push checks (comprehensive)
+	@echo "✅ Pre-push checks passed"
+
+# ============================================================================
+# CI/CD
+# ============================================================================
+
+.PHONY: ci
+ci: deps quality test-cover test-race test-integration build ## Run CI pipeline locally
+	@echo "✅ CI pipeline passed"
+
+.PHONY: ci-coverage
+ci-coverage: ## Check test coverage meets threshold (80%)
+	@echo "Checking coverage threshold..."
+	@go test -coverprofile=coverage.out ./... > /dev/null 2>&1
+	@go tool cover -func=coverage.out | grep total | awk '{if ($$3+0 < 80.0) {print "❌ Coverage below 80%:", $$3; exit 1} else {print "✅ Coverage:", $$3}}'
+
+# ============================================================================
+# Deployment
+# ============================================================================
+
+.PHONY: deploy-staging
+deploy-staging: ## Deploy to staging environment
+	@echo "Deploying to staging..."
+	kubectl apply -f deployments/k8s/staging/
+	@echo "✅ Deployed to staging"
+
+.PHONY: deploy-prod
+deploy-prod: ## Deploy to production environment
+	@echo "⚠️  Deploying to production..."
+	@read -p "Are you sure? [y/N] " -n 1 -r; \
+	echo; \
+	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
+		kubectl apply -f deployments/k8s/production/; \
+		echo "✅ Deployed to production"; \
+	else \
+		echo "❌ Deployment cancelled"; \
+	fi
+
+# ============================================================================
+# Cleanup
+# ============================================================================
+
+.PHONY: clean
+clean: ## Clean build artifacts
+	rm -rf bin/
+	rm -rf coverage.out coverage.html
+	rm -rf tmp/
+	@echo "✅ Cleaned"
+
+.PHONY: clean-all
+clean-all: clean dev-clean ## Clean everything (including Docker volumes)
+	go clean -cache -testcache -modcache
+	@echo "✅ Everything cleaned"
+
+# ============================================================================
+# Utilities
+# ============================================================================
+
+.PHONY: generate
+generate: ## Run go generate
+	go generate ./...
+
+.PHONY: tidy
+tidy: ## Tidy go.mod and go.sum
+	go mod tidy
+
+.PHONY: verify
+verify: ## Verify dependencies
+	go mod verify
+
+.PHONY: outdated
+outdated: ## Check for outdated dependencies
+	go list -u -m all
+
+.PHONY: graph
+graph: ## Generate dependency graph
+	go mod graph | modgraphviz | dot -Tpng -o dependencies.png
+	@echo "✅ Dependency graph: dependencies.png"
+
+# ============================================================================
+# Quick Start
+# ============================================================================
+
+.PHONY: setup
+setup: install-tools deps dev migrate-up db-seed ## Complete setup for new developers
+	@echo ""
+	@echo "✅ Setup complete!"
+	@echo ""
+	@echo "Quick start:"
+	@echo "  make run-api    # Start API server"
+	@echo "  make test       # Run tests"
+	@echo "  make help       # Show all commands"
+
+.PHONY: bootstrap
+bootstrap: ## Bootstrap new Golang project (run once)
+	./bootstrap-fintech-go.sh finaegis-go
+	@echo "✅ Project bootstrapped in ./finaegis-go/"
+
+# ============================================================================
+# TDD Workflow
+# ============================================================================
+
+.PHONY: tdd
+tdd: ## Start TDD workflow (test watch mode)
+	@echo "Starting TDD workflow..."
+	@echo "Tests will run automatically on file changes"
+	gotestsum --watch
+
+.PHONY: red
+red: ## TDD Red phase - run tests (should fail)
+	@echo "🔴 RED: Running tests (expect failure)..."
+	go test -v ./... || true
+
+.PHONY: green
+green: ## TDD Green phase - run tests (should pass)
+	@echo "🟢 GREEN: Running tests (expect success)..."
+	go test -v ./...
+
+.PHONY: refactor
+refactor: fmt lint ## TDD Refactor phase - format and lint
+	@echo "🔵 REFACTOR: Code cleaned up"
+
+# ============================================================================
+# Context Management
+# ============================================================================
+
+.PHONY: context
+context: ## Show current AI context
+	@cat .ai-context.md | head -50
+
+.PHONY: context-update
+context-update: ## Update AI context timestamp
+	@sed -i "s/Last Updated:.*/Last Updated: $$(date '+%Y-%m-%d %H:%M:%S')/" .ai-context.md
+	@echo "✅ Context updated"
+
+# ============================================================================
+# Configuration
+# ============================================================================
+
+# Default database URL (override with environment variable)
+DATABASE_URL ?= postgresql://postgres:postgres@localhost:5432/finaegis?sslmode=disable
+
+# Default environment
+ENV ?= development
+
+# Go build flags
+LDFLAGS := -ldflags "-s -w"
