@@ -1425,6 +1425,511 @@ go test -tags=integration ./control-plane/tests/integration/... -v
 ---
 
 
+
+### Task 2.1: Ory Kratos Identity Provider Interface
+
+**Task ID:** P2-ORY-001
+**Description:** Define hexagonal port for identity provider abstraction
+**Priority:** Critical
+**Complexity:** 8h
+
+**Dependencies:** P0-INFRA-002
+
+**Acceptance Criteria:**
+- [ ] IdentityProvider interface with CRUD operations
+- [ ] Session management methods
+- [ ] Multi-tenant realm support
+- [ ] Adapter pattern implementation
+- [ ] In-memory mock for testing
+
+**Files to Create:**
+```
+internal/ports/identity_provider.go
+internal/infrastructure/adapters/ory/kratos_adapter.go
+internal/infrastructure/adapters/memory/identity_mock.go
+```
+
+**Implementation:**
+```go
+type IdentityProvider interface {
+    CreateIdentity(ctx context.Context, tenantID string, traits map[string]interface{}) (*Identity, error)
+    GetIdentity(ctx context.Context, tenantID, identityID string) (*Identity, error)
+    UpdateIdentity(ctx context.Context, tenantID, identityID string, traits map[string]interface{}) error
+    DeleteIdentity(ctx context.Context, tenantID, identityID string) error
+    ListIdentities(ctx context.Context, tenantID string, page, perPage int) ([]*Identity, error)
+    IdentityExists(ctx context.Context, tenantID, identityID string) (bool, error)
+    ValidateSession(ctx context.Context, sessionToken string) (*Session, error)
+}
+```
+
+---
+
+### Task 2.2: Ory Kratos Adapter Implementation
+
+**Task ID:** P2-ORY-002
+**Description:** Implement Ory Kratos adapter for IdentityProvider interface
+**Priority:** Critical
+**Complexity:** 12h
+
+**Dependencies:** P2-ORY-001
+
+**Acceptance Criteria:**
+- [ ] Full CRUD operations via Kratos API
+- [ ] Tenant realm isolation
+- [ ] Error mapping to domain errors
+- [ ] Retry logic with exponential backoff
+- [ ] Connection pooling
+
+**Implementation:**
+```go
+type KratosAdapter struct {
+    client *kratos.APIClient
+    config *KratosConfig
+}
+
+func (a *KratosAdapter) CreateIdentity(ctx context.Context, tenantID string, traits map[string]interface{}) (*Identity, error) {
+    req := a.client.IdentityAPI.CreateIdentity(ctx).CreateIdentityBody(kratos.CreateIdentityBody{
+        SchemaId: "default",
+        Traits:   traits,
+        MetadataPublic: map[string]interface{}{"tenant_id": tenantID},
+    })
+
+    identity, resp, err := req.Execute()
+    if err != nil {
+        return nil, mapKratosError(err, resp)
+    }
+
+    return &Identity{
+        ID:       identity.Id,
+        TenantID: tenantID,
+        Traits:   identity.Traits,
+    }, nil
+}
+```
+
+---
+
+### Task 2.3: Ory Keto Authorization Provider Interface
+
+**Task ID:** P2-ORY-003
+**Description:** Define hexagonal port for authorization abstraction
+**Priority:** Critical
+**Complexity:** 10h
+
+**Dependencies:** P0-INFRA-002
+
+**Acceptance Criteria:**
+- [ ] AuthorizationProvider interface with ReBAC operations
+- [ ] Relationship tuple management
+- [ ] Permission checking with two-layer fallback
+- [ ] Namespace management
+- [ ] Mock adapter for testing
+
+**Implementation:**
+```go
+type AuthorizationProvider interface {
+    CheckPermission(ctx context.Context, req PermissionCheckRequest) (bool, error)
+    GrantPermission(ctx context.Context, tenantID, subjectID, object, relation string) error
+    RevokePermission(ctx context.Context, tenantID, subjectID, object, relation string) error
+    ListPermissions(ctx context.Context, subjectID string) ([]*Permission, error)
+    CreateNamespace(ctx context.Context, tenantID, namespace string) error
+}
+
+type PermissionCheckRequest struct {
+    TenantID   string
+    SubjectID  string
+    Object     string
+    Relation   string
+    AccountID  string // For fallback check
+}
+```
+
+---
+
+### Task 2.4: Ory Keto Adapter Implementation
+
+**Task ID:** P2-ORY-004
+**Description:** Implement Ory Keto adapter with two-layer permission fallback
+**Priority:** Critical
+**Complexity:** 14h
+
+**Dependencies:** P2-ORY-003
+
+**Acceptance Criteria:**
+- [ ] Relation tuple API integration
+- [ ] Two-layer check (wallet → account membership)
+- [ ] Namespace prefix per tenant
+- [ ] Batch permission checks
+- [ ] Transactional tuple updates
+
+**Implementation:**
+```go
+func (a *KetoAdapter) CheckPermission(ctx context.Context, req PermissionCheckRequest) (bool, error) {
+    namespace := fmt.Sprintf("%s_finaegis", req.TenantID)
+
+    // Layer 1: Check wallet-level permission
+    allowed, err := a.client.RelationshipAPI.CheckPermissionOrError(ctx).
+        Namespace(namespace).
+        Object(req.Object).
+        Relation(req.Relation).
+        SubjectId(req.SubjectID).
+        Execute()
+
+    if err == nil && allowed.Allowed {
+        return true, nil
+    }
+
+    // Layer 2: Fallback to account membership
+    if req.AccountID != "" {
+        allowed, err = a.client.RelationshipAPI.CheckPermissionOrError(ctx).
+            Namespace(namespace).
+            Object(req.AccountID).
+            Relation("admin").
+            SubjectId(req.SubjectID).
+            Execute()
+
+        return allowed.Allowed, err
+    }
+
+    return false, nil
+}
+```
+
+---
+
+### Task 2.5: Ory Oathkeeper Gateway Interface
+
+**Task ID:** P2-ORY-005
+**Description:** Define APIGateway interface for request routing
+**Priority:** High
+**Complexity:** 8h
+
+**Dependencies:** P0-INFRA-002
+
+**Acceptance Criteria:**
+- [ ] APIGateway interface for routing rules
+- [ ] Access rule management
+- [ ] Authenticator configuration
+- [ ] Authorizer configuration
+- [ ] Mock adapter
+
+**Implementation:**
+```go
+type APIGateway interface {
+    CreateRule(ctx context.Context, rule *AccessRule) error
+    UpdateRule(ctx context.Context, ruleID string, rule *AccessRule) error
+    DeleteRule(ctx context.Context, ruleID string) error
+    GetRule(ctx context.Context, ruleID string) (*AccessRule, error)
+    ListRules(ctx context.Context) ([]*AccessRule, error)
+}
+
+type AccessRule struct {
+    ID          string
+    Match       *Match
+    Authenticators []Authenticator
+    Authorizer  *Authorizer
+    Mutators    []Mutator
+    Upstream    *Upstream
+}
+```
+
+---
+
+### Task 2.6: Ory Oathkeeper Adapter Implementation
+
+**Task ID:** P2-ORY-006
+**Description:** Implement Oathkeeper adapter for dynamic routing
+**Priority:** High
+**Complexity:** 10h
+
+**Dependencies:** P2-ORY-005
+
+**Acceptance Criteria:**
+- [ ] Dynamic rule creation per tenant
+- [ ] Host header-based routing
+- [ ] Tenant domain → tenant ID mapping
+- [ ] Rule templates for common patterns
+- [ ] Rule validation
+
+**Implementation:**
+```go
+func (a *OathkeeperAdapter) CreateRule(ctx context.Context, rule *AccessRule) error {
+    oathkeeperRule := &oathkeeper.Rule{
+        Id: rule.ID,
+        Match: &oathkeeper.RuleMatch{
+            Methods: []string{"GET", "POST", "PUT", "DELETE"},
+            Url:     fmt.Sprintf("https://%s/<.*>", rule.Match.Host),
+        },
+        Authenticators: []oathkeeper.RuleHandler{{Handler: "cookie_session"}},
+        Authorizer:     &oathkeeper.RuleHandler{Handler: "keto_engine_acp_ory"},
+        Mutators:       []oathkeeper.RuleHandler{{Handler: "id_token"}},
+        Upstream: &oathkeeper.Upstream{
+            Url: rule.Upstream.URL,
+        },
+    }
+
+    return a.client.CreateRule(ctx, oathkeeperRule)
+}
+```
+
+---
+
+### Task 2.7: Identity Schema Configuration
+
+**Task ID:** P2-ORY-007
+**Description:** Configure Kratos identity schemas for tenant isolation
+**Priority:** Medium
+**Complexity:** 6h
+
+**Dependencies:** P2-ORY-002
+
+**Acceptance Criteria:**
+- [ ] Base identity schema with tenant metadata
+- [ ] Schema versioning support
+- [ ] Custom trait validation
+- [ ] Schema migration scripts
+- [ ] Documentation
+
+**Implementation:**
+```json
+{
+  "$id": "https://finaegis.com/schemas/identity.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "FinAegis Identity",
+  "type": "object",
+  "properties": {
+    "traits": {
+      "type": "object",
+      "properties": {
+        "email": {"type": "string", "format": "email"},
+        "name": {"type": "string"},
+        "phone": {"type": "string"},
+        "tenant_id": {"type": "string", "format": "uuid"}
+      },
+      "required": ["email", "tenant_id"]
+    }
+  }
+}
+```
+
+---
+
+### Task 2.8: Permission Model Design
+
+**Task ID:** P2-ORY-008
+**Description:** Design Keto permission model with namespaces and relations
+**Priority:** High
+**Complexity:** 10h
+
+**Dependencies:** P2-ORY-004
+
+**Acceptance Criteria:**
+- [ ] Namespace configuration per tenant
+- [ ] Relation definitions (owner, admin, member, viewer)
+- [ ] Subject sets for hierarchical permissions
+- [ ] Permission inheritance rules
+- [ ] Migration from existing RBAC
+
+**Implementation:**
+```yaml
+# keto namespace config
+namespaces:
+  - name: tenant_123_finaegis
+    relations:
+      - name: owner
+        subject_set_relation: ""
+      - name: admin
+        subject_set_relation: ""
+      - name: member
+        subject_set_relation: ""
+      - name: viewer
+        subject_set_relation: ""
+      - name: can_read
+        subject_set_relation: "viewer,member,admin,owner"
+      - name: can_write
+        subject_set_relation: "member,admin,owner"
+      - name: can_delete
+        subject_set_relation: "admin,owner"
+```
+
+---
+
+### Task 2.9: Ory Stack Integration Testing
+
+**Task ID:** P2-ORY-009
+**Description:** Integration tests for Ory adapters
+**Priority:** High
+**Complexity:** 12h
+
+**Dependencies:** P2-ORY-002, P2-ORY-004, P2-ORY-006
+
+**Acceptance Criteria:**
+- [ ] Kratos adapter integration tests
+- [ ] Keto adapter integration tests
+- [ ] Oathkeeper routing tests
+- [ ] Multi-tenant isolation tests
+- [ ] Error handling tests
+
+**Implementation:**
+```go
+func TestKratosAdapter_Integration(t *testing.T) {
+    adapter := setupKratosAdapter(t)
+    ctx := context.Background()
+
+    // Create identity
+    identity, err := adapter.CreateIdentity(ctx, "tenant-123", map[string]interface{}{
+        "email": "test@example.com",
+        "name":  "Test User",
+    })
+    require.NoError(t, err)
+    assert.NotEmpty(t, identity.ID)
+
+    // Get identity
+    retrieved, err := adapter.GetIdentity(ctx, "tenant-123", identity.ID)
+    require.NoError(t, err)
+    assert.Equal(t, identity.ID, retrieved.ID)
+
+    // Delete identity
+    err = adapter.DeleteIdentity(ctx, "tenant-123", identity.ID)
+    require.NoError(t, err)
+}
+```
+
+---
+
+### Task 2.10: Tenant-Scoped Kratos Realms
+
+**Task ID:** P2-ORY-010
+**Description:** Configure per-tenant Kratos realms for identity isolation
+**Priority:** High
+**Complexity:** 10h
+
+**Dependencies:** P2-ORY-002, P1-CONTROL-001
+
+**Acceptance Criteria:**
+- [ ] Realm provisioning workflow
+- [ ] Per-tenant Kratos configuration
+- [ ] Realm-scoped identity queries
+- [ ] Realm deletion on tenant cleanup
+- [ ] Realm migration tools
+
+**Implementation:**
+```go
+func (s *TenantService) ProvisionKratosRealm(ctx context.Context, tenantID string) error {
+    config := &KratosRealmConfig{
+        Name:   fmt.Sprintf("tenant_%s", tenantID),
+        SelfServiceFlows: &SelfServiceConfig{
+            RegistrationEnabled: true,
+            RecoveryEnabled:     true,
+        },
+        IdentitySchemas: []string{"default"},
+    }
+
+    realm, err := s.kratosAdmin.CreateRealm(ctx, config)
+    if err != nil {
+        return err
+    }
+
+    // Store realm ID in tenant record
+    return s.repo.UpdateTenant(ctx, tenantID, map[string]interface{}{
+        "kratos_realm_id": realm.ID,
+    })
+}
+```
+
+---
+
+### Task 2.11: Keto Namespace Per Tenant
+
+**Task ID:** P2-ORY-011
+**Description:** Configure per-tenant Keto namespaces for authorization isolation
+**Priority:** High
+**Complexity:** 10h
+
+**Dependencies:** P2-ORY-004, P1-CONTROL-001
+
+**Acceptance Criteria:**
+- [ ] Namespace provisioning workflow
+- [ ] Namespace prefix validation
+- [ ] Tenant-scoped relation tuples
+- [ ] Namespace deletion on tenant cleanup
+- [ ] Cross-namespace query prevention
+
+**Implementation:**
+```go
+func (s *TenantService) ProvisionKetoNamespace(ctx context.Context, tenantID string) error {
+    namespace := fmt.Sprintf("tenant_%s_finaegis", tenantID)
+
+    config := &KetoNamespaceConfig{
+        Name: namespace,
+        Relations: []RelationConfig{
+            {Name: "owner"},
+            {Name: "admin"},
+            {Name: "member"},
+            {Name: "viewer"},
+        },
+    }
+
+    err := s.ketoAdmin.CreateNamespace(ctx, config)
+    if err != nil {
+        return err
+    }
+
+    return s.repo.UpdateTenant(ctx, tenantID, map[string]interface{}{
+        "keto_namespace_prefix": namespace,
+    })
+}
+```
+
+---
+
+### Task 2.12: Oathkeeper Routing Rules Per Tenant
+
+**Task ID:** P2-ORY-012
+**Description:** Configure dynamic Oathkeeper rules for tenant routing
+**Priority:** High
+**Complexity:** 10h
+
+**Dependencies:** P2-ORY-006, P1-CONTROL-001
+
+**Acceptance Criteria:**
+- [ ] Rule creation on tenant activation
+- [ ] Host header → tenant ID mapping
+- [ ] Upstream routing to tenant-plane
+- [ ] Rule deletion on tenant deletion
+- [ ] Rule validation and testing
+
+**Implementation:**
+```go
+func (s *TenantService) ConfigureOathkeeperRule(ctx context.Context, tenant *Tenant) error {
+    rule := &AccessRule{
+        ID: fmt.Sprintf("tenant_%s_api", tenant.ID),
+        Match: &Match{
+            Host:    tenant.Domain,
+            Methods: []string{"*"},
+            Path:    "/<.*>",
+        },
+        Authenticators: []Authenticator{
+            {Handler: "cookie_session"},
+        },
+        Authorizer: &Authorizer{
+            Handler: "keto_engine_acp_ory",
+            Config: map[string]interface{}{
+                "required_permission": "can_access",
+                "subject":             "identity.id",
+            },
+        },
+        Upstream: &Upstream{
+            URL: fmt.Sprintf("http://tenant-plane:8081?tenant=%s", tenant.ID),
+        },
+    }
+
+    return s.oathkeeper.CreateRule(ctx, rule)
+}
+```
+
+---
+
 ## Phase 3: Formance Integration
 
 **Duration:** Weeks 8-10 (2.5 weeks)
