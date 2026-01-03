@@ -3111,6 +3111,377 @@ Each tenant gets isolated event tables:
 
 
 
+
+### Task 5.1: Tenant Context Extraction Middleware
+
+**Task ID:** P5-SCHEMA-001
+**Description:** Extract tenant ID from X-Tenant-ID header or domain
+**Priority:** Critical
+**Complexity:** 6h
+
+**Dependencies:** P1-CONTROL-003
+
+**Acceptance Criteria:**
+- [ ] Middleware extracts tenant ID from X-Tenant-ID header
+- [ ] Fallback to domain-based lookup
+- [ ] Tenant validation against registry
+- [ ] Context propagation to downstream handlers
+- [ ] Error handling for invalid tenants
+
+**Implementation:**
+```go
+type TenantContextMiddleware struct {
+    tenantService TenantService
+}
+
+func (m *TenantContextMiddleware) Handle(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        ctx := r.Context()
+
+        // Try X-Tenant-ID header first
+        tenantID := r.Header.Get("X-Tenant-ID")
+
+        // Fallback to domain lookup
+        if tenantID == "" {
+            domain := r.Host
+            tenant, err := m.tenantService.GetByDomain(ctx, domain)
+            if err != nil {
+                http.Error(w, "Tenant not found", http.StatusNotFound)
+                return
+            }
+            tenantID = tenant.ID.String()
+        }
+
+        // Validate tenant is active
+        tenant, err := m.tenantService.GetByID(ctx, tenantID)
+        if err != nil || tenant.Status != StatusActive {
+            http.Error(w, "Tenant not active", http.StatusForbidden)
+            return
+        }
+
+        // Add to context
+        ctx = context.WithValue(ctx, "tenant_id", tenantID)
+        ctx = context.WithValue(ctx, "tenant", tenant)
+
+        next.ServeHTTP(w, r.WithContext(ctx))
+    })
+}
+```
+
+---
+
+### Task 5.2: PostgreSQL Search Path Middleware
+
+**Task ID:** P5-SCHEMA-002
+**Description:** Set PostgreSQL search_path based on tenant context
+**Priority:** Critical
+**Complexity:** 8h
+
+**Dependencies:** P5-SCHEMA-001
+
+**Acceptance Criteria:**
+- [ ] Automatic SET search_path on DB connection
+- [ ] Connection pooling per tenant schema
+- [ ] Search path reset after request
+- [ ] Performance optimization
+- [ ] Connection leak prevention
+
+**Implementation:**
+```go
+type SchemaIsolationMiddleware struct {
+    db *gorm.DB
+}
+
+func (m *SchemaIsolationMiddleware) Handle(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        ctx := r.Context()
+        tenant := ctx.Value("tenant").(*Tenant)
+
+        // Create scoped DB session
+        scopedDB := m.db.WithContext(ctx).Session(&gorm.Session{})
+
+        // Set search path for this session
+        if err := scopedDB.Exec(fmt.Sprintf("SET search_path TO %s", tenant.SchemaName)).Error; err != nil {
+            http.Error(w, "Failed to set schema", http.StatusInternalServerError)
+            return
+        }
+
+        // Add scoped DB to context
+        ctx = context.WithValue(ctx, "db", scopedDB)
+
+        next.ServeHTTP(w, r.WithContext(ctx))
+
+        // Reset search path (optional, connection will be returned to pool)
+        scopedDB.Exec("RESET search_path")
+    })
+}
+```
+
+---
+
+### Task 5.3: Tenant-Scoped Database Connection Pool
+
+**Task ID:** P5-SCHEMA-003
+**Description:** Implement per-tenant connection pooling strategy
+**Priority:** High
+**Complexity:** 10h
+
+**Dependencies:** P5-SCHEMA-002
+
+**Acceptance Criteria:**
+- [ ] Connection pool per tenant schema
+- [ ] Pool size configuration
+- [ ] Connection lifetime management
+- [ ] Pool monitoring and metrics
+- [ ] Graceful pool shutdown
+
+**Implementation:**
+```go
+type TenantConnectionPool struct {
+    pools  map[string]*sql.DB
+    config *PoolConfig
+    mu     sync.RWMutex
+}
+
+func (p *TenantConnectionPool) GetConnection(tenantID string, schemaName string) (*sql.DB, error) {
+    p.mu.RLock()
+    pool, exists := p.pools[tenantID]
+    p.mu.RUnlock()
+
+    if exists {
+        return pool, nil
+    }
+
+    // Create new pool
+    p.mu.Lock()
+    defer p.mu.Unlock()
+
+    // Double-check after acquiring write lock
+    if pool, exists = p.pools[tenantID]; exists {
+        return pool, nil
+    }
+
+    dsn := fmt.Sprintf("%s?search_path=%s", p.config.BaseDSN, schemaName)
+    db, err := sql.Open("postgres", dsn)
+    if err != nil {
+        return nil, err
+    }
+
+    db.SetMaxOpenConns(p.config.MaxOpenConns)
+    db.SetMaxIdleConns(p.config.MaxIdleConns)
+    db.SetConnMaxLifetime(p.config.ConnMaxLifetime)
+
+    p.pools[tenantID] = db
+    return db, nil
+}
+```
+
+---
+
+### Task 5.4: Request-Level Tenant Context Propagation
+
+**Task ID:** P5-SCHEMA-004
+**Description:** Propagate tenant context through request lifecycle
+**Priority:** Medium
+**Complexity:** 6h
+
+**Dependencies:** P5-SCHEMA-001
+
+**Acceptance Criteria:**
+- [ ] Context helpers for tenant access
+- [ ] Tenant validation in all handlers
+- [ ] Goroutine-safe context propagation
+- [ ] Logging with tenant ID
+- [ ] Metrics tagged by tenant
+
+**Implementation:**
+```go
+type TenantContext struct {
+    TenantID   string
+    SchemaName string
+    Tenant     *Tenant
+}
+
+func GetTenantContext(ctx context.Context) (*TenantContext, error) {
+    tenant, ok := ctx.Value("tenant").(*Tenant)
+    if !ok {
+        return nil, errors.New("tenant not found in context")
+    }
+
+    return &TenantContext{
+        TenantID:   tenant.ID.String(),
+        SchemaName: tenant.SchemaName,
+        Tenant:     tenant,
+    }, nil
+}
+
+func MustGetTenantContext(ctx context.Context) *TenantContext {
+    tc, err := GetTenantContext(ctx)
+    if err != nil {
+        panic(err)
+    }
+    return tc
+}
+
+// Logger with tenant context
+func LoggerWithTenant(ctx context.Context, logger *zap.Logger) *zap.Logger {
+    if tc, err := GetTenantContext(ctx); err == nil {
+        return logger.With(
+            zap.String("tenant_id", tc.TenantID),
+            zap.String("schema", tc.SchemaName),
+        )
+    }
+    return logger
+}
+```
+
+---
+
+### Task 5.5: Cross-Tenant Query Prevention
+
+**Task ID:** P5-SCHEMA-005
+**Description:** Implement safeguards against cross-tenant data access
+**Priority:** Critical
+**Complexity:** 10h
+
+**Dependencies:** P5-SCHEMA-002
+
+**Acceptance Criteria:**
+- [ ] Query analysis for schema leaks
+- [ ] Circuit breaker for suspicious queries
+- [ ] Audit logging for all DB queries
+- [ ] Alerts for cross-tenant attempts
+- [ ] Integration tests
+
+**Implementation:**
+```go
+type QueryGuard struct {
+    logger *zap.Logger
+}
+
+func (g *QueryGuard) BeforeQuery(ctx context.Context, query string, args []interface{}) error {
+    tc, err := GetTenantContext(ctx)
+    if err != nil {
+        return errors.New("tenant context required")
+    }
+
+    // Check for global table access
+    forbiddenPatterns := []string{
+        "FROM tenants",
+        "FROM control_plane",
+        "FROM public.",
+    }
+
+    lowerQuery := strings.ToLower(query)
+    for _, pattern := range forbiddenPatterns {
+        if strings.Contains(lowerQuery, strings.ToLower(pattern)) {
+            g.logger.Error("Cross-tenant query attempt blocked",
+                zap.String("tenant_id", tc.TenantID),
+                zap.String("query", query),
+            )
+            return errors.New("cross-tenant query blocked")
+        }
+    }
+
+    // Log query
+    g.logger.Debug("Query executed",
+        zap.String("tenant_id", tc.TenantID),
+        zap.String("query", query),
+    )
+
+    return nil
+}
+```
+
+---
+
+### Task 5.6: Schema Isolation Integration Testing
+
+**Task ID:** P5-SCHEMA-006
+**Description:** Comprehensive tests for tenant isolation
+**Priority:** Critical
+**Complexity:** 8h
+
+**Dependencies:** P5-SCHEMA-001 through P5-SCHEMA-005
+
+**Acceptance Criteria:**
+- [ ] Multi-tenant data isolation tests
+- [ ] Concurrent request tests
+- [ ] Cross-tenant access prevention tests
+- [ ] Performance benchmarks
+- [ ] Stress tests
+
+**Implementation:**
+```go
+func TestSchemaIsolation_MultiTenant(t *testing.T) {
+    // Create two tenants
+    tenant1 := createTestTenant(t, "tenant1")
+    tenant2 := createTestTenant(t, "tenant2")
+
+    // Insert data for tenant1
+    ctx1 := context.WithValue(context.Background(), "tenant", tenant1)
+    db1 := getDB(ctx1)
+    db1.Create(&Account{Name: "Tenant1 Account"})
+
+    // Insert data for tenant2
+    ctx2 := context.WithValue(context.Background(), "tenant", tenant2)
+    db2 := getDB(ctx2)
+    db2.Create(&Account{Name: "Tenant2 Account"})
+
+    // Verify tenant1 cannot see tenant2 data
+    var accounts1 []Account
+    db1.Find(&accounts1)
+    assert.Len(t, accounts1, 1)
+    assert.Equal(t, "Tenant1 Account", accounts1[0].Name)
+
+    // Verify tenant2 cannot see tenant1 data
+    var accounts2 []Account
+    db2.Find(&accounts2)
+    assert.Len(t, accounts2, 1)
+    assert.Equal(t, "Tenant2 Account", accounts2[0].Name)
+}
+
+func TestSchemaIsolation_ConcurrentRequests(t *testing.T) {
+    tenants := [](*Tenant){
+        createTestTenant(t, "tenant1"),
+        createTestTenant(t, "tenant2"),
+        createTestTenant(t, "tenant3"),
+    }
+
+    var wg sync.WaitGroup
+    for i := 0; i < 100; i++ {
+        wg.Add(1)
+        go func(idx int) {
+            defer wg.Done()
+            tenant := tenants[idx%3]
+            ctx := context.WithValue(context.Background(), "tenant", tenant)
+
+            // Perform DB operations
+            db := getDB(ctx)
+            db.Create(&Account{Name: fmt.Sprintf("Account-%d", idx)})
+
+            var count int64
+            db.Model(&Account{}).Count(&count)
+            assert.Greater(t, count, int64(0))
+        }(i)
+    }
+
+    wg.Wait()
+
+    // Verify each tenant has correct number of accounts
+    for _, tenant := range tenants {
+        ctx := context.WithValue(context.Background(), "tenant", tenant)
+        db := getDB(ctx)
+
+        var count int64
+        db.Model(&Account{}).Count(&count)
+        assert.Equal(t, int64(33), count) // 100/3 = 33 per tenant (approximately)
+    }
+}
+```
+
+---
+
 ## Phase 6: Account Domain
 
 **Duration:** Weeks 15-16 (2 weeks)
