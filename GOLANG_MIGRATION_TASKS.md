@@ -1954,6 +1954,495 @@ func (s *TenantService) ConfigureOathkeeperRule(ctx context.Context, tenant *Ten
 ---
 
 
+
+### Task 3.1: Formance Ledger Service Interface
+
+**Task ID:** P3-FORMANCE-001
+**Description:** Define LedgerService hexagonal port for ledger abstraction
+**Priority:** Critical
+**Complexity:** 10h
+
+**Dependencies:** P0-INFRA-003
+
+**Acceptance Criteria:**
+- [ ] LedgerService interface with transaction operations
+- [ ] Multi-ledger support (one per tenant)
+- [ ] Transaction posting with metadata
+- [ ] Balance queries
+- [ ] Mock adapter for testing
+
+**Implementation:**
+```go
+type LedgerService interface {
+    CreateLedger(ctx context.Context, tenantID, name string) (*Ledger, error)
+    PostTransaction(ctx context.Context, ledgerID string, tx *Transaction) (*TransactionResult, error)
+    GetBalance(ctx context.Context, ledgerID, account string) (*Balance, error)
+    ListTransactions(ctx context.Context, ledgerID string, filter *TxFilter) ([]*Transaction, error)
+    RevertTransaction(ctx context.Context, ledgerID, txID string) error
+}
+
+type Transaction struct {
+    Reference string
+    Postings  []Posting
+    Metadata  map[string]interface{}
+}
+
+type Posting struct {
+    Source      string
+    Destination string
+    Amount      int64
+    Asset       string
+}
+```
+
+---
+
+### Task 3.2: Formance Ledger Adapter Implementation
+
+**Task ID:** P3-FORMANCE-002
+**Description:** Implement Formance Ledger adapter with double-entry bookkeeping
+**Priority:** Critical
+**Complexity:** 14h
+
+**Dependencies:** P3-FORMANCE-001
+
+**Acceptance Criteria:**
+- [ ] Formance API integration
+- [ ] Transaction posting with idempotency
+- [ ] Ledger isolation per tenant
+- [ ] Error handling and retry logic
+- [ ] Transaction reversal support
+
+**Implementation:**
+```go
+type FormanceLedgerAdapter struct {
+    client *formance.APIClient
+}
+
+func (a *FormanceLedgerAdapter) PostTransaction(ctx context.Context, ledgerID string, tx *Transaction) (*TransactionResult, error) {
+    postings := make([]formance.Posting, len(tx.Postings))
+    for i, p := range tx.Postings {
+        postings[i] = formance.Posting{
+            Source:      p.Source,
+            Destination: p.Destination,
+            Amount:      formance.NewMonetary(p.Amount, p.Asset),
+        }
+    }
+
+    script := &formance.Script{
+        Plain: generateNumscriptFromPostings(postings),
+        Vars:  tx.Metadata,
+    }
+
+    result, resp, err := a.client.TransactionsAPI.CreateTransaction(ctx, ledgerID).
+        PostTransaction(formance.PostTransaction{
+            Postings:  postings,
+            Reference: &tx.Reference,
+            Metadata:  &tx.Metadata,
+        }).
+        Execute()
+
+    if err != nil {
+        return nil, mapFormanceError(err, resp)
+    }
+
+    return &TransactionResult{
+        ID:        result.Data.Txid,
+        Timestamp: result.Data.Timestamp,
+    }, nil
+}
+```
+
+---
+
+### Task 3.3: Formance Wallets Service Interface
+
+**Task ID:** P3-FORMANCE-003
+**Description:** Define WalletService hexagonal port for wallet operations
+**Priority:** Critical
+**Complexity:** 8h
+
+**Dependencies:** P0-INFRA-003
+
+**Acceptance Criteria:**
+- [ ] WalletService interface with credit/debit operations
+- [ ] Multi-asset wallet support
+- [ ] Balance holds
+- [ ] Wallet metadata management
+- [ ] Mock adapter
+
+**Implementation:**
+```go
+type WalletService interface {
+    CreateWallet(ctx context.Context, tenantID, name string, metadata map[string]interface{}) (string, error)
+    Credit(ctx context.Context, walletID string, amount *Monetary, metadata map[string]interface{}) (*Transaction, error)
+    Debit(ctx context.Context, walletID string, amount *Monetary, metadata map[string]interface{}) (*Transaction, error)
+    GetBalance(ctx context.Context, walletID string) (*Balance, error)
+    Hold(ctx context.Context, walletID string, amount *Monetary) (*Hold, error)
+    ReleaseHold(ctx context.Context, holdID string) error
+}
+
+type Monetary struct {
+    Amount   int64
+    Currency string
+}
+```
+
+---
+
+### Task 3.4: Formance Wallets Adapter Implementation
+
+**Task ID:** P3-FORMANCE-004
+**Description:** Implement Formance Wallets adapter with multi-asset support
+**Priority:** Critical
+**Complexity:** 12h
+
+**Dependencies:** P3-FORMANCE-003
+
+**Acceptance Criteria:**
+- [ ] Wallet CRUD operations
+- [ ] Credit/debit with idempotency
+- [ ] Multi-asset balance management
+- [ ] Hold/release operations
+- [ ] Transaction history queries
+
+**Implementation:**
+```go
+type FormanceWalletAdapter struct {
+    client *formance.APIClient
+}
+
+func (a *FormanceWalletAdapter) Credit(ctx context.Context, walletID string, amount *Monetary, metadata map[string]interface{}) (*Transaction, error) {
+    req := &formance.CreditWalletRequest{
+        Amount: &formance.Monetary{
+            Asset:  amount.Currency,
+            Amount: big.NewInt(amount.Amount),
+        },
+        Metadata: metadata,
+    }
+
+    result, resp, err := a.client.WalletsAPI.CreditWallet(ctx, walletID).
+        CreditWalletRequest(*req).
+        Execute()
+
+    if err != nil {
+        return nil, mapFormanceError(err, resp)
+    }
+
+    return &Transaction{
+        ID:       result.Data.Id,
+        WalletID: walletID,
+        Amount:   amount,
+        Type:     "credit",
+    }, nil
+}
+```
+
+---
+
+### Task 3.5: Formance Ledger Per Tenant Provisioning
+
+**Task ID:** P3-FORMANCE-005
+**Description:** Provision dedicated Formance ledger instance per tenant
+**Priority:** High
+**Complexity:** 10h
+
+**Dependencies:** P3-FORMANCE-002, P1-CONTROL-001
+
+**Acceptance Criteria:**
+- [ ] Ledger creation workflow
+- [ ] Ledger configuration per tenant
+- [ ] Chart of accounts initialization
+- [ ] Ledger deletion on tenant cleanup
+- [ ] Ledger migration tools
+
+**Implementation:**
+```go
+func (s *TenantService) ProvisionFormanceLedger(ctx context.Context, tenantID string) error {
+    ledgerName := fmt.Sprintf("ledger-tenant-%s", tenantID)
+
+    ledger, err := s.formanceLedger.CreateLedger(ctx, tenantID, ledgerName)
+    if err != nil {
+        return err
+    }
+
+    // Initialize chart of accounts
+    accounts := []string{
+        "world",           // External source/sink
+        "bank:assets",     // Customer assets
+        "bank:liabilities", // Customer liabilities
+        "fees:revenue",    // Fee revenue
+    }
+
+    for _, account := range accounts {
+        if err := s.formanceLedger.CreateAccount(ctx, ledger.ID, account); err != nil {
+            return err
+        }
+    }
+
+    return s.repo.UpdateTenant(ctx, tenantID, map[string]interface{}{
+        "formance_ledger_id": ledger.ID,
+    })
+}
+```
+
+---
+
+### Task 3.6: Formance Wallets Per Tenant Provisioning
+
+**Task ID:** P3-FORMANCE-006
+**Description:** Configure Formance Wallets service per tenant
+**Priority:** High
+**Complexity:** 8h
+
+**Dependencies:** P3-FORMANCE-004, P1-CONTROL-001
+
+**Acceptance Criteria:**
+- [ ] Wallets service configuration
+- [ ] Per-tenant wallet pools
+- [ ] Default wallet creation
+- [ ] Wallet cleanup on tenant deletion
+- [ ] Wallet migration tools
+
+**Implementation:**
+```go
+func (s *AccountService) ProvisionDefaultWallet(ctx context.Context, tenantID, accountID string) (string, error) {
+    walletName := fmt.Sprintf("wallet-%s-default", accountID)
+
+    walletID, err := s.walletService.CreateWallet(ctx, tenantID, walletName, map[string]interface{}{
+        "account_id": accountID,
+        "type":       "default",
+    })
+
+    if err != nil {
+        return "", err
+    }
+
+    // Link wallet to account in domain
+    if err := s.accountRepo.LinkWallet(ctx, accountID, walletID); err != nil {
+        return "", err
+    }
+
+    return walletID, nil
+}
+```
+
+---
+
+### Task 3.7: Numscript Transaction Scripts
+
+**Task ID:** P3-FORMANCE-007
+**Description:** Create Numscript templates for common transactions
+**Priority:** Medium
+**Complexity:** 10h
+
+**Dependencies:** P3-FORMANCE-002
+
+**Acceptance Criteria:**
+- [ ] Deposit script template
+- [ ] Withdrawal script template
+- [ ] Transfer script template
+- [ ] Fee collection script
+- [ ] Script validation
+
+**Implementation:**
+```numscript
+// Deposit script
+vars {
+  account $account
+  monetary $amount
+}
+
+send $amount (
+  source = @world
+  destination = $account
+)
+
+// Withdrawal script
+vars {
+  account $account
+  monetary $amount
+}
+
+send $amount (
+  source = $account
+  destination = @world
+)
+
+// Transfer with fee
+vars {
+  account $from
+  account $to
+  monetary $amount
+  monetary $fee
+}
+
+send $amount (
+  source = $from
+  destination = $to
+)
+
+send $fee (
+  source = $from
+  destination = @fees:revenue
+)
+```
+
+---
+
+### Task 3.8: Formance Event Streaming Integration
+
+**Task ID:** P3-FORMANCE-008
+**Description:** Integrate Formance event streams with domain event bus
+**Priority:** Medium
+**Complexity:** 10h
+
+**Dependencies:** P3-FORMANCE-002, P0-INFRA-006
+
+**Acceptance Criteria:**
+- [ ] Formance webhook receiver
+- [ ] Event mapping to domain events
+- [ ] Event publishing to Redis streams
+- [ ] Event replay capability
+- [ ] Dead letter queue
+
+**Implementation:**
+```go
+type FormanceEventHandler struct {
+    eventBus *redis.EventBus
+}
+
+func (h *FormanceEventHandler) HandleWebhook(ctx context.Context, event *FormanceEvent) error {
+    switch event.Type {
+    case "COMMITTED_TRANSACTIONS":
+        return h.handleTransactionCommitted(ctx, event)
+    case "SAVED_METADATA":
+        return h.handleMetadataUpdated(ctx, event)
+    default:
+        return nil
+    }
+}
+
+func (h *FormanceEventHandler) handleTransactionCommitted(ctx context.Context, event *FormanceEvent) error {
+    tx := event.Data.(*TransactionCommitted)
+
+    domainEvent := &TransactionPostedEvent{
+        TenantID:    extractTenantID(tx.Metadata),
+        LedgerID:    event.LedgerID,
+        TransactionID: tx.TxID,
+        Postings:    tx.Postings,
+        Timestamp:   tx.Timestamp,
+    }
+
+    return h.eventBus.Publish(ctx, domainEvent.TenantID, "transaction.posted", domainEvent)
+}
+```
+
+---
+
+### Task 3.9: Formance API Error Handling
+
+**Task ID:** P3-FORMANCE-009
+**Description:** Implement comprehensive error handling for Formance APIs
+**Priority:** High
+**Complexity:** 8h
+
+**Dependencies:** P3-FORMANCE-002, P3-FORMANCE-004
+
+**Acceptance Criteria:**
+- [ ] Error mapping to domain errors
+- [ ] Retry logic with circuit breaker
+- [ ] Idempotency key management
+- [ ] Rate limit handling
+- [ ] Detailed error logging
+
+**Implementation:**
+```go
+func mapFormanceError(err error, resp *http.Response) error {
+    if resp == nil {
+        return &DomainError{Code: "FORMANCE_UNAVAILABLE", Message: err.Error()}
+    }
+
+    switch resp.StatusCode {
+    case 409:
+        return &DomainError{Code: "CONFLICT", Message: "Transaction already exists"}
+    case 400:
+        return &DomainError{Code: "INVALID_TRANSACTION", Message: err.Error()}
+    case 429:
+        return &DomainError{Code: "RATE_LIMIT", Message: "Rate limit exceeded", Retryable: true}
+    case 500, 502, 503, 504:
+        return &DomainError{Code: "FORMANCE_ERROR", Message: err.Error(), Retryable: true}
+    default:
+        return &DomainError{Code: "UNKNOWN_ERROR", Message: err.Error()}
+    }
+}
+
+func withRetry(ctx context.Context, fn func() error) error {
+    return retry.Do(
+        fn,
+        retry.Attempts(3),
+        retry.Delay(time.Second),
+        retry.DelayType(retry.BackOffDelay),
+        retry.RetryIf(func(err error) bool {
+            if domainErr, ok := err.(*DomainError); ok {
+                return domainErr.Retryable
+            }
+            return false
+        }),
+    )
+}
+```
+
+---
+
+### Task 3.10: Formance Integration Testing
+
+**Task ID:** P3-FORMANCE-010
+**Description:** Integration tests for Formance adapters
+**Priority:** High
+**Complexity:** 10h
+
+**Dependencies:** P3-FORMANCE-002, P3-FORMANCE-004
+
+**Acceptance Criteria:**
+- [ ] Ledger adapter integration tests
+- [ ] Wallet adapter integration tests
+- [ ] Transaction posting tests
+- [ ] Multi-asset balance tests
+- [ ] Error handling tests
+
+**Implementation:**
+```go
+func TestFormanceLedgerAdapter_Integration(t *testing.T) {
+    adapter := setupFormanceLedgerAdapter(t)
+    ctx := context.Background()
+
+    // Create ledger
+    ledger, err := adapter.CreateLedger(ctx, "test-tenant", "test-ledger")
+    require.NoError(t, err)
+
+    // Post transaction
+    tx := &Transaction{
+        Reference: "test-001",
+        Postings: []Posting{
+            {Source: "world", Destination: "user:123", Amount: 10000, Asset: "USD"},
+        },
+        Metadata: map[string]interface{}{"type": "deposit"},
+    }
+
+    result, err := adapter.PostTransaction(ctx, ledger.ID, tx)
+    require.NoError(t, err)
+    assert.NotEmpty(t, result.ID)
+
+    // Get balance
+    balance, err := adapter.GetBalance(ctx, ledger.ID, "user:123")
+    require.NoError(t, err)
+    assert.Equal(t, int64(10000), balance.Amount)
+}
+```
+
+---
+
 ## Phase 4: Event Horizon Setup (Event Sourcing for Non-Financial Domains)
 
 **Duration:** Weeks 11-12 (1.5 weeks)
