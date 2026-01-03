@@ -3517,7 +3517,414 @@ func TestSchemaIsolation_ConcurrentRequests(t *testing.T) {
 - **6.7:** Account Testing (unit, integration, e2e)
 - **6.8:** Account Integration & Verification (complete integration testing)
 
-[Full task details will be added in final implementation]
+
+---
+
+### Task 6.1: Account Value Objects
+
+**Task ID:** P6-ACCOUNT-001
+**Description:** Create value objects for Account domain (AccountType, AccountStatus, Ownership)
+**Priority:** Critical
+**Complexity:** 12h
+
+**Dependencies:** P0-INFRA-001
+
+**Acceptance Criteria:**
+- [ ] AccountType (B2C/B2B) with polymorphic behavior
+- [ ] AccountStatus with state transition validation
+- [ ] Ownership value object with tenant scoping
+- [ ] AccountMetadata for non-financial data
+- [ ] AccountSettings with configuration options
+- [ ] Immutability enforced
+- [ ] Test coverage >95%
+
+**Files to Create:**
+```
+internal/domain/account/valueobject/
+├── account_type.go
+├── account_status.go
+├── ownership.go
+├── account_metadata.go
+└── account_settings.go
+```
+
+**Implementation:**
+```go
+type AccountType string
+
+const (
+    AccountTypeB2C AccountType = "b2c"  // Personal, single owner
+    AccountTypeB2B AccountType = "b2b"  // Corporate, multi-user
+)
+
+func (at AccountType) IsBusiness() bool { return at == AccountTypeB2B }
+func (at AccountType) IsPersonal() bool { return at == AccountTypeB2C }
+func (at AccountType) RequiresMultiUserSupport() bool { return at == AccountTypeB2B }
+
+type AccountStatus string
+
+const (
+    AccountStatusPendingActivation AccountStatus = "pending_activation"
+    AccountStatusActive            AccountStatus = "active"
+    AccountStatusFrozen            AccountStatus = "frozen"
+    AccountStatusSuspended         AccountStatus = "suspended"
+    AccountStatusClosed            AccountStatus = "closed"
+)
+
+func (as AccountStatus) CanTransitionTo(newStatus AccountStatus) bool {
+    validTransitions := map[AccountStatus][]AccountStatus{
+        AccountStatusPendingActivation: {AccountStatusActive, AccountStatusClosed},
+        AccountStatusActive: {AccountStatusFrozen, AccountStatusSuspended, AccountStatusClosed},
+        AccountStatusFrozen: {AccountStatusActive, AccountStatusSuspended, AccountStatusClosed},
+        AccountStatusSuspended: {AccountStatusActive, AccountStatusClosed},
+        AccountStatusClosed: {},
+    }
+    for _, allowed := range validTransitions[as] {
+        if allowed == newStatus { return true }
+    }
+    return false
+}
+```
+
+**Testing:**
+```bash
+go test ./internal/domain/account/valueobject -v -cover
+```
+
+---
+
+### Task 6.2: Account Aggregate
+
+**Task ID:** P6-ACCOUNT-002
+**Description:** Create event-sourced Account aggregate with B2C/B2B logic
+**Priority:** Critical
+**Complexity:** 16h
+
+**Dependencies:** P6-ACCOUNT-001, P4-EVENTHORIZON-002
+
+**Acceptance Criteria:**
+- [ ] Account aggregate with event sourcing
+- [ ] CreateAccount, ActivateAccount, FreezeAccount methods
+- [ ] B2B-specific AddMember/RemoveMember methods
+- [ ] LinkWallet/UnlinkWallet methods
+- [ ] Event application methods
+- [ ] State reconstruction from events
+- [ ] Test coverage >90%
+
+**Files to Create:**
+```
+internal/domain/account/aggregate/account.go
+internal/domain/account/event/
+├── account_created.go
+├── account_activated.go
+├── account_frozen.go
+├── member_added.go
+└── wallet_linked.go
+```
+
+**Implementation:**
+```go
+type Account struct {
+    *eventhorizon.AggregateBase
+    accountID   string
+    tenantID    string
+    ownership   *valueobject.Ownership
+    status      valueobject.AccountStatus
+    members     map[string]string  // B2B only: userID -> role
+    wallets     []string           // Formance wallet IDs
+}
+
+func (a *Account) CreateAccount(ctx context.Context, accountID, tenantID string,
+    accountType valueobject.AccountType, ownerID string, metadata *Metadata) error {
+
+    ownership, _ := valueobject.NewOwnership(accountType, ownerID, tenantID)
+
+    a.RecordThat(event.AccountCreated{
+        AccountID:   accountID,
+        TenantID:    tenantID,
+        AccountType: accountType,
+        OwnerID:     ownerID,
+        Name:        metadata.Name(),
+    })
+    return nil
+}
+
+func (a *Account) AddMember(userID, role string) error {
+    if !a.ownership.IsBusiness() {
+        return errors.New("can only add members to B2B accounts")
+    }
+    a.RecordThat(event.MemberAdded{AccountID: a.accountID, UserID: userID, Role: role})
+    return nil
+}
+```
+
+---
+
+### Task 6.3: Account Repository Ports
+
+**Task ID:** P6-ACCOUNT-003
+**Description:** Define repository interfaces (ports) for Account domain
+**Priority:** High
+**Complexity:** 10h
+
+**Dependencies:** P6-ACCOUNT-002
+
+**Acceptance Criteria:**
+- [ ] AccountRepository interface with CRUD operations
+- [ ] Tenant-scoped query methods
+- [ ] PostgreSQL adapter implementation
+- [ ] In-memory mock for testing
+- [ ] Event Horizon integration for event storage
+- [ ] Test coverage >90%
+
+**Files to Create:**
+```
+internal/domain/account/ports/repository.go
+internal/infrastructure/persistence/postgres/account_repository.go
+internal/infrastructure/persistence/memory/account_repository.go
+```
+
+**Implementation:**
+```go
+type AccountRepository interface {
+    Save(ctx context.Context, account *aggregate.Account) error
+    FindByID(ctx context.Context, tenantID, accountID string) (*AccountProjection, error)
+    FindByOwner(ctx context.Context, tenantID, ownerID string) ([]*AccountProjection, error)
+    FindByTenant(ctx context.Context, tenantID string, limit, offset int) ([]*AccountProjection, error)
+    ExistsByID(ctx context.Context, tenantID, accountID string) (bool, error)
+}
+
+type AccountProjection struct {
+    AccountID   string
+    TenantID    string
+    AccountType valueobject.AccountType
+    Status      valueobject.AccountStatus
+    Wallets     []string
+    Members     map[string]string
+    CreatedAt   time.Time
+}
+```
+
+---
+
+### Task 6.4: Account Service Layer
+
+**Task ID:** P6-ACCOUNT-004
+**Description:** Business logic layer with Ory/Formance integration
+**Priority:** High
+**Complexity:** 14h
+
+**Dependencies:** P6-ACCOUNT-003, P2-ORY-002, P3-FORMANCE-004
+
+**Acceptance Criteria:**
+- [ ] CreateAccount with identity validation (Ory Kratos)
+- [ ] ProvisionWallet with Formance integration
+- [ ] AddMember with permission grants (Ory Keto)
+- [ ] FreezeAccount, ActivateAccount operations
+- [ ] Event publishing to event bus
+- [ ] Test coverage >85%
+
+**Implementation:**
+```go
+type AccountService struct {
+    repo              AccountRepository
+    eventStore        eventhorizon.EventStore
+    identityProvider  ports.IdentityProvider      // Ory Kratos
+    authzProvider     ports.AuthorizationProvider // Ory Keto
+    walletService     ports.WalletService         // Formance
+}
+
+func (s *AccountService) CreateAccount(ctx context.Context, tenantID string,
+    accountType valueobject.AccountType, ownerID, name string) (string, error) {
+
+    // Validate owner exists in Kratos
+    exists, _ := s.identityProvider.IdentityExists(ctx, tenantID, ownerID)
+    if !exists {
+        return "", errors.New("owner not found")
+    }
+
+    account := aggregate.NewAccount(uuid.New())
+    metadata, _ := valueobject.NewAccountMetadata(name)
+    account.CreateAccount(ctx, account.ID.String(), tenantID, accountType, ownerID, metadata)
+
+    s.eventStore.Save(ctx, account.Events(), 0)
+    s.repo.Save(ctx, account)
+
+    // Grant owner permissions in Keto
+    s.authzProvider.GrantPermission(ctx, tenantID, ownerID, "account", account.ID.String(), "owner")
+
+    return account.ID.String(), nil
+}
+```
+
+---
+
+### Task 6.5: Account API Endpoints
+
+**Task ID:** P6-ACCOUNT-005
+**Description:** REST API endpoints for Account management
+**Priority:** High
+**Complexity:** 12h
+
+**Dependencies:** P6-ACCOUNT-004, P5-SCHEMA-001
+
+**Acceptance Criteria:**
+- [ ] POST /api/v1/accounts - Create account
+- [ ] GET /api/v1/accounts - List accounts
+- [ ] GET /api/v1/accounts/:id - Get account
+- [ ] PATCH /api/v1/accounts/:id - Update metadata
+- [ ] POST /api/v1/accounts/:id/members - Add member (B2B)
+- [ ] POST /api/v1/accounts/:id/wallets - Provision wallet
+- [ ] OpenAPI documentation
+- [ ] Test coverage >85%
+
+**Implementation:**
+```go
+func (h *AccountHandler) Create(c *gin.Context) {
+    var req CreateAccountRequest
+    c.ShouldBindJSON(&req)
+
+    accountID, err := h.service.CreateAccount(
+        c.Request.Context(),
+        c.GetString("tenant_id"),
+        req.AccountType,
+        req.OwnerID,
+        req.Name,
+    )
+
+    if err != nil {
+        c.JSON(500, gin.H{"error": err.Error()})
+        return
+    }
+
+    c.JSON(201, gin.H{"account_id": accountID})
+}
+```
+
+---
+
+### Task 6.6: Account Workflows
+
+**Task ID:** P6-ACCOUNT-006
+**Description:** Temporal workflows for account operations
+**Priority:** Medium
+**Complexity:** 14h
+
+**Dependencies:** P6-ACCOUNT-004, P0-INFRA-005
+
+**Acceptance Criteria:**
+- [ ] ProvisionAccountWorkflow (create → activate → provision wallet)
+- [ ] CloseAccountWorkflow (unlink wallets → close → cleanup)
+- [ ] FreezeAccountWorkflow with notifications
+- [ ] Saga compensation for failures
+- [ ] Test coverage >80%
+
+**Implementation:**
+```go
+func ProvisionAccountWorkflow(ctx workflow.Context, input ProvisionAccountInput) (*ProvisionAccountOutput, error) {
+    ao := workflow.ActivityOptions{StartToCloseTimeout: 10 * time.Minute}
+    ctx = workflow.WithActivityOptions(ctx, ao)
+
+    // Create account
+    var accountID string
+    workflow.ExecuteActivity(ctx, CreateAccountActivity, input).Get(ctx, &accountID)
+
+    // Activate account
+    workflow.ExecuteActivity(ctx, ActivateAccountActivity, accountID).Get(ctx, nil)
+
+    // Provision default wallet
+    var walletID string
+    workflow.ExecuteActivity(ctx, ProvisionWalletActivity, accountID).Get(ctx, &walletID)
+
+    return &ProvisionAccountOutput{AccountID: accountID, WalletID: walletID}, nil
+}
+```
+
+---
+
+### Task 6.7: Account Testing
+
+**Task ID:** P6-ACCOUNT-007
+**Description:** Comprehensive testing suite for Account domain
+**Priority:** High
+**Complexity:** 10h
+
+**Dependencies:** P6-ACCOUNT-001 through P6-ACCOUNT-006
+
+**Acceptance Criteria:**
+- [ ] Unit tests for value objects (>95%)
+- [ ] Unit tests for aggregates (>90%)
+- [ ] Integration tests for services (>85%)
+- [ ] API endpoint tests (>85%)
+- [ ] E2E workflow tests (>80%)
+
+**Implementation:**
+```go
+func TestAccount_CreateB2CAccount(t *testing.T) {
+    account := aggregate.NewAccount(uuid.New())
+    metadata, _ := valueobject.NewAccountMetadata("Personal Account")
+
+    err := account.CreateAccount(ctx, "acc-123", "tenant-abc",
+        valueobject.AccountTypeB2C, "user-xyz", metadata, "admin")
+
+    require.NoError(t, err)
+    assert.Equal(t, valueobject.AccountStatusPendingActivation, account.Status())
+}
+
+func TestAccount_B2B_AddMember(t *testing.T) {
+    account := createB2BAccount(t)
+    err := account.AddMember("user-2", "admin", "owner")
+    require.NoError(t, err)
+    assert.Contains(t, account.Members(), "user-2")
+}
+```
+
+---
+
+### Task 6.8: Account Integration & Verification
+
+**Task ID:** P6-ACCOUNT-008
+**Description:** End-to-end integration testing and verification
+**Priority:** High
+**Complexity:** 8h
+
+**Dependencies:** P6-ACCOUNT-001 through P6-ACCOUNT-007
+
+**Acceptance Criteria:**
+- [ ] E2E tests with Ory Stack integration
+- [ ] E2E tests with Formance integration
+- [ ] Tenant isolation verification
+- [ ] Performance benchmarks (<100ms account creation)
+- [ ] Load testing (1000 concurrent operations)
+
+**Implementation:**
+```go
+func TestAccountE2E_CompleteFlow(t *testing.T) {
+    tenant := createTestTenant(t)
+    user := createTestUserInKratos(t, tenant.ID)
+
+    // Create B2C account
+    accountID, _ := accountService.CreateAccount(ctx, tenant.ID,
+        valueobject.AccountTypeB2C, user.ID, "Personal Account")
+
+    // Activate
+    accountService.ActivateAccount(ctx, tenant.ID, accountID, user.ID)
+
+    // Provision wallet
+    walletID, _ := accountService.ProvisionWallet(ctx, tenant.ID, accountID, "Main Wallet")
+
+    // Verify in Formance
+    wallet, _ := formanceClient.GetWallet(ctx, tenant.ID, walletID)
+    assert.Equal(t, walletID, wallet.ID)
+
+    // Verify permissions in Keto
+    hasPermission, _ := ketoClient.CheckPermission(ctx, tenant.ID, user.ID, "account", accountID, "owner")
+    assert.True(t, hasPermission)
+}
+```
+
+---
+
 
 ---
 
