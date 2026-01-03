@@ -8,7 +8,7 @@
 
 **Total Tasks:** 238 (updated with infrastructure phases)
 **Total Estimated Hours:** 2,968 hours (~74 weeks)
-**Completion Status:** 100% documented
+**Completion Status:** 100% documented (all 238 tasks with specifications)
 **Last Updated:** 2026-01-02
 
 **Phase Breakdown:**
@@ -1040,6 +1040,365 @@ func TestTenantService_GetByDomain(t *testing.T) {
 
 
 
+
+---
+
+### Task 1.2: Tenant Repository Implementation
+
+**Task ID:** P1-CONTROL-002
+**Description:** Implement PostgreSQL repository for tenant data persistence
+**Priority:** Critical
+**Complexity:** 8h
+
+**Dependencies:** P1-CONTROL-001
+
+**Acceptance Criteria:**
+- [ ] GORM repository with tenant-scoped queries
+- [ ] Optimistic locking for concurrent updates
+- [ ] Efficient domain lookup with indexing
+- [ ] Soft delete support
+- [ ] Migration scripts for tenant table
+
+**Files to Create:**
+```
+control-plane/internal/tenant/repository.go
+migrations/control_plane/001_create_tenants_table.sql
+```
+
+**Implementation:**
+```go
+type Repository struct {
+    db *gorm.DB
+}
+
+func (r *Repository) Create(ctx context.Context, tenant *Tenant) error {
+    return r.db.WithContext(ctx).Create(tenant).Error
+}
+
+func (r *Repository) FindByDomain(ctx context.Context, domain string) (*Tenant, error) {
+    var tenant Tenant
+    err := r.db.WithContext(ctx).Where("domain = ?", domain).First(&tenant).Error
+    return &tenant, err
+}
+```
+
+**Testing:**
+```bash
+go test ./control-plane/internal/tenant -v -run TestRepository
+```
+
+---
+
+### Task 1.3: Tenant Service Layer
+
+**Task ID:** P1-CONTROL-003
+**Description:** Business logic layer for tenant operations
+**Priority:** High
+**Complexity:** 12h
+
+**Dependencies:** P1-CONTROL-002
+
+**Acceptance Criteria:**
+- [ ] CreateTenant with slug generation
+- [ ] ActivateTenant, SuspendTenant operations
+- [ ] Domain availability check
+- [ ] Tenant validation rules
+- [ ] Event publishing for tenant lifecycle
+
+**Files to Create:**
+```
+control-plane/internal/tenant/service.go
+control-plane/internal/tenant/service_test.go
+```
+
+**Implementation:**
+```go
+func (s *Service) CreateTenant(ctx context.Context, input CreateInput) (*Tenant, error) {
+    slug := generateSlug(input.Name)
+    tenant := &Tenant{
+        Name:       input.Name,
+        Slug:       slug,
+        Domain:     input.Domain,
+        SchemaName: fmt.Sprintf("tenant_%s", slug),
+        Status:     StatusProvisioning,
+    }
+    if err := s.repo.Create(ctx, tenant); err != nil {
+        return nil, err
+    }
+    s.eventBus.Publish("tenant.created", tenant)
+    return tenant, nil
+}
+```
+
+---
+
+### Task 1.4: Tenant Metrics & Monitoring
+
+**Task ID:** P1-CONTROL-004
+**Description:** Prometheus metrics for tenant lifecycle monitoring
+**Priority:** Medium
+**Complexity:** 10h
+
+**Dependencies:** P1-CONTROL-003, P0-INFRA-007
+
+**Acceptance Criteria:**
+- [ ] Tenant count by status gauge
+- [ ] Provisioning duration histogram
+- [ ] Tenant operations counter
+- [ ] Grafana dashboard for tenant metrics
+- [ ] Alerts for provisioning failures
+
+**Files to Create:**
+```
+control-plane/internal/tenant/metrics.go
+deployments/docker/grafana/dashboards/tenant-metrics.json
+```
+
+**Implementation:**
+```go
+var (
+    tenantCount = promauto.NewGaugeVec(
+        prometheus.GaugeOpts{
+            Name: "tenant_count_by_status",
+            Help: "Number of tenants by status",
+        },
+        []string{"status"},
+    )
+
+    provisioningDuration = promauto.NewHistogram(
+        prometheus.HistogramOpts{
+            Name: "tenant_provisioning_duration_seconds",
+            Buckets: []float64{1, 5, 10, 30, 60, 120, 300},
+        },
+    )
+)
+```
+
+---
+
+### Task 1.5: Tenant Billing Integration
+
+**Task ID:** P1-CONTROL-005
+**Description:** Integrate billing system for tenant subscription management
+**Priority:** Medium
+**Complexity:** 12h
+
+**Dependencies:** P1-CONTROL-003
+
+**Acceptance Criteria:**
+- [ ] Billing provider interface (Stripe/custom)
+- [ ] Subscription creation on tenant activation
+- [ ] Usage tracking integration
+- [ ] Webhook handling for payment events
+- [ ] Billing status sync with tenant status
+
+**Files to Create:**
+```
+control-plane/internal/billing/
+├── provider.go
+├── stripe_adapter.go
+└── webhook_handler.go
+```
+
+**Implementation:**
+```go
+type BillingProvider interface {
+    CreateSubscription(tenantID string, plan string) (*Subscription, error)
+    CancelSubscription(subscriptionID string) error
+    GetUsage(tenantID string) (*Usage, error)
+}
+
+type StripeAdapter struct {
+    client *stripe.Client
+}
+
+func (a *StripeAdapter) CreateSubscription(tenantID, plan string) (*Subscription, error) {
+    params := &stripe.SubscriptionParams{
+        Customer: stripe.String(tenantID),
+        Items: []*stripe.SubscriptionItemsParams{{Price: stripe.String(plan)}},
+    }
+    sub, err := subscription.New(params)
+    return &Subscription{ID: sub.ID, Status: string(sub.Status)}, err
+}
+```
+
+---
+
+### Task 1.6: Tenant Lifecycle Workflows
+
+**Task ID:** P1-CONTROL-006
+**Description:** Temporal workflows for tenant suspend/resume/delete operations
+**Priority:** High
+**Complexity:** 10h
+
+**Dependencies:** P1-CONTROL-003, P0-INFRA-005
+
+**Acceptance Criteria:**
+- [ ] SuspendTenantWorkflow with data retention
+- [ ] ResumeTenantWorkflow with validation
+- [ ] DeleteTenantWorkflow with cleanup
+- [ ] Rollback/compensation logic
+- [ ] Workflow state persistence
+
+**Files to Create:**
+```
+control-plane/internal/workflows/tenant/
+├── suspend_workflow.go
+├── resume_workflow.go
+└── delete_workflow.go
+```
+
+**Implementation:**
+```go
+func SuspendTenantWorkflow(ctx workflow.Context, tenantID string) error {
+    ao := workflow.ActivityOptions{StartToCloseTimeout: 5 * time.Minute}
+    ctx = workflow.WithActivityOptions(ctx, ao)
+
+    // Step 1: Mark tenant as suspended
+    if err := workflow.ExecuteActivity(ctx, UpdateTenantStatus, tenantID, "suspended").Get(ctx, nil); err != nil {
+        return err
+    }
+
+    // Step 2: Disable API access
+    if err := workflow.ExecuteActivity(ctx, RevokeAPIAccess, tenantID).Get(ctx, nil); err != nil {
+        return err
+    }
+
+    // Step 3: Notify tenant
+    workflow.ExecuteActivity(ctx, SendSuspensionNotification, tenantID).Get(ctx, nil)
+
+    return nil
+}
+```
+
+---
+
+### Task 1.7: Tenant Migration Tools
+
+**Task ID:** P1-CONTROL-007
+**Description:** CLI tools for tenant data migration and maintenance
+**Priority:** Medium
+**Complexity:** 14h
+
+**Dependencies:** P1-CONTROL-003
+
+**Acceptance Criteria:**
+- [ ] Tenant export tool (schema + data)
+- [ ] Tenant import tool with validation
+- [ ] Schema migration runner
+- [ ] Data integrity verification
+- [ ] Rollback capability
+
+**Files to Create:**
+```
+control-plane/cmd/tenant-cli/
+├── main.go
+├── export.go
+├── import.go
+└── migrate.go
+```
+
+**Implementation:**
+```go
+// CLI command structure
+func main() {
+    app := &cli.App{
+        Name: "tenant-cli",
+        Commands: []*cli.Command{
+            {
+                Name: "export",
+                Action: exportTenant,
+                Flags: []cli.Flag{
+                    &cli.StringFlag{Name: "tenant-id", Required: true},
+                    &cli.StringFlag{Name: "output", Value: "export.tar.gz"},
+                },
+            },
+            {
+                Name: "import",
+                Action: importTenant,
+            },
+            {
+                Name: "migrate",
+                Action: migrateTenant,
+            },
+        },
+    }
+    app.Run(os.Args)
+}
+
+func exportTenant(c *cli.Context) error {
+    tenantID := c.String("tenant-id")
+    // Dump schema and data to archive
+    return createExportArchive(tenantID, c.String("output"))
+}
+```
+
+---
+
+### Task 1.8: Control Plane Integration Testing
+
+**Task ID:** P1-CONTROL-008
+**Description:** End-to-end integration tests for control plane
+**Priority:** High
+**Complexity:** 10h
+
+**Dependencies:** P1-CONTROL-001 through P1-CONTROL-007
+
+**Acceptance Criteria:**
+- [ ] Full tenant lifecycle test (create → activate → suspend → delete)
+- [ ] Concurrent tenant creation test
+- [ ] Billing integration test with mocks
+- [ ] Workflow execution tests
+- [ ] API endpoint integration tests
+
+**Files to Create:**
+```
+control-plane/tests/integration/
+├── tenant_lifecycle_test.go
+├── billing_test.go
+├── workflow_test.go
+└── api_test.go
+```
+
+**Implementation:**
+```go
+func TestTenantLifecycle_E2E(t *testing.T) {
+    ctx := context.Background()
+    containers := testutil.SetupTestContainers(t)
+
+    // Create tenant
+    tenant, err := service.CreateTenant(ctx, CreateInput{
+        Name: "Test Corp", Domain: "test.example.com",
+    })
+    require.NoError(t, err)
+    assert.Equal(t, StatusProvisioning, tenant.Status)
+
+    // Activate tenant
+    err = service.ActivateTenant(ctx, tenant.ID)
+    require.NoError(t, err)
+
+    // Verify subscription created
+    sub, err := billingService.GetSubscription(tenant.ID)
+    require.NoError(t, err)
+    assert.Equal(t, "active", sub.Status)
+
+    // Suspend tenant
+    err = workflowClient.ExecuteWorkflow(ctx, SuspendTenantWorkflow, tenant.ID)
+    require.NoError(t, err)
+
+    // Delete tenant
+    err = workflowClient.ExecuteWorkflow(ctx, DeleteTenantWorkflow, tenant.ID)
+    require.NoError(t, err)
+}
+```
+
+**Testing:**
+```bash
+go test -tags=integration ./control-plane/tests/integration/... -v
+```
+
+---
+
 ## Phase 2: Ory Stack Integration
 
 **Duration:** Weeks 5-7 (3 weeks)
@@ -1066,6 +1425,511 @@ func TestTenantService_GetByDomain(t *testing.T) {
 ---
 
 
+
+### Task 2.1: Ory Kratos Identity Provider Interface
+
+**Task ID:** P2-ORY-001
+**Description:** Define hexagonal port for identity provider abstraction
+**Priority:** Critical
+**Complexity:** 8h
+
+**Dependencies:** P0-INFRA-002
+
+**Acceptance Criteria:**
+- [ ] IdentityProvider interface with CRUD operations
+- [ ] Session management methods
+- [ ] Multi-tenant realm support
+- [ ] Adapter pattern implementation
+- [ ] In-memory mock for testing
+
+**Files to Create:**
+```
+internal/ports/identity_provider.go
+internal/infrastructure/adapters/ory/kratos_adapter.go
+internal/infrastructure/adapters/memory/identity_mock.go
+```
+
+**Implementation:**
+```go
+type IdentityProvider interface {
+    CreateIdentity(ctx context.Context, tenantID string, traits map[string]interface{}) (*Identity, error)
+    GetIdentity(ctx context.Context, tenantID, identityID string) (*Identity, error)
+    UpdateIdentity(ctx context.Context, tenantID, identityID string, traits map[string]interface{}) error
+    DeleteIdentity(ctx context.Context, tenantID, identityID string) error
+    ListIdentities(ctx context.Context, tenantID string, page, perPage int) ([]*Identity, error)
+    IdentityExists(ctx context.Context, tenantID, identityID string) (bool, error)
+    ValidateSession(ctx context.Context, sessionToken string) (*Session, error)
+}
+```
+
+---
+
+### Task 2.2: Ory Kratos Adapter Implementation
+
+**Task ID:** P2-ORY-002
+**Description:** Implement Ory Kratos adapter for IdentityProvider interface
+**Priority:** Critical
+**Complexity:** 12h
+
+**Dependencies:** P2-ORY-001
+
+**Acceptance Criteria:**
+- [ ] Full CRUD operations via Kratos API
+- [ ] Tenant realm isolation
+- [ ] Error mapping to domain errors
+- [ ] Retry logic with exponential backoff
+- [ ] Connection pooling
+
+**Implementation:**
+```go
+type KratosAdapter struct {
+    client *kratos.APIClient
+    config *KratosConfig
+}
+
+func (a *KratosAdapter) CreateIdentity(ctx context.Context, tenantID string, traits map[string]interface{}) (*Identity, error) {
+    req := a.client.IdentityAPI.CreateIdentity(ctx).CreateIdentityBody(kratos.CreateIdentityBody{
+        SchemaId: "default",
+        Traits:   traits,
+        MetadataPublic: map[string]interface{}{"tenant_id": tenantID},
+    })
+
+    identity, resp, err := req.Execute()
+    if err != nil {
+        return nil, mapKratosError(err, resp)
+    }
+
+    return &Identity{
+        ID:       identity.Id,
+        TenantID: tenantID,
+        Traits:   identity.Traits,
+    }, nil
+}
+```
+
+---
+
+### Task 2.3: Ory Keto Authorization Provider Interface
+
+**Task ID:** P2-ORY-003
+**Description:** Define hexagonal port for authorization abstraction
+**Priority:** Critical
+**Complexity:** 10h
+
+**Dependencies:** P0-INFRA-002
+
+**Acceptance Criteria:**
+- [ ] AuthorizationProvider interface with ReBAC operations
+- [ ] Relationship tuple management
+- [ ] Permission checking with two-layer fallback
+- [ ] Namespace management
+- [ ] Mock adapter for testing
+
+**Implementation:**
+```go
+type AuthorizationProvider interface {
+    CheckPermission(ctx context.Context, req PermissionCheckRequest) (bool, error)
+    GrantPermission(ctx context.Context, tenantID, subjectID, object, relation string) error
+    RevokePermission(ctx context.Context, tenantID, subjectID, object, relation string) error
+    ListPermissions(ctx context.Context, subjectID string) ([]*Permission, error)
+    CreateNamespace(ctx context.Context, tenantID, namespace string) error
+}
+
+type PermissionCheckRequest struct {
+    TenantID   string
+    SubjectID  string
+    Object     string
+    Relation   string
+    AccountID  string // For fallback check
+}
+```
+
+---
+
+### Task 2.4: Ory Keto Adapter Implementation
+
+**Task ID:** P2-ORY-004
+**Description:** Implement Ory Keto adapter with two-layer permission fallback
+**Priority:** Critical
+**Complexity:** 14h
+
+**Dependencies:** P2-ORY-003
+
+**Acceptance Criteria:**
+- [ ] Relation tuple API integration
+- [ ] Two-layer check (wallet → account membership)
+- [ ] Namespace prefix per tenant
+- [ ] Batch permission checks
+- [ ] Transactional tuple updates
+
+**Implementation:**
+```go
+func (a *KetoAdapter) CheckPermission(ctx context.Context, req PermissionCheckRequest) (bool, error) {
+    namespace := fmt.Sprintf("%s_finaegis", req.TenantID)
+
+    // Layer 1: Check wallet-level permission
+    allowed, err := a.client.RelationshipAPI.CheckPermissionOrError(ctx).
+        Namespace(namespace).
+        Object(req.Object).
+        Relation(req.Relation).
+        SubjectId(req.SubjectID).
+        Execute()
+
+    if err == nil && allowed.Allowed {
+        return true, nil
+    }
+
+    // Layer 2: Fallback to account membership
+    if req.AccountID != "" {
+        allowed, err = a.client.RelationshipAPI.CheckPermissionOrError(ctx).
+            Namespace(namespace).
+            Object(req.AccountID).
+            Relation("admin").
+            SubjectId(req.SubjectID).
+            Execute()
+
+        return allowed.Allowed, err
+    }
+
+    return false, nil
+}
+```
+
+---
+
+### Task 2.5: Ory Oathkeeper Gateway Interface
+
+**Task ID:** P2-ORY-005
+**Description:** Define APIGateway interface for request routing
+**Priority:** High
+**Complexity:** 8h
+
+**Dependencies:** P0-INFRA-002
+
+**Acceptance Criteria:**
+- [ ] APIGateway interface for routing rules
+- [ ] Access rule management
+- [ ] Authenticator configuration
+- [ ] Authorizer configuration
+- [ ] Mock adapter
+
+**Implementation:**
+```go
+type APIGateway interface {
+    CreateRule(ctx context.Context, rule *AccessRule) error
+    UpdateRule(ctx context.Context, ruleID string, rule *AccessRule) error
+    DeleteRule(ctx context.Context, ruleID string) error
+    GetRule(ctx context.Context, ruleID string) (*AccessRule, error)
+    ListRules(ctx context.Context) ([]*AccessRule, error)
+}
+
+type AccessRule struct {
+    ID          string
+    Match       *Match
+    Authenticators []Authenticator
+    Authorizer  *Authorizer
+    Mutators    []Mutator
+    Upstream    *Upstream
+}
+```
+
+---
+
+### Task 2.6: Ory Oathkeeper Adapter Implementation
+
+**Task ID:** P2-ORY-006
+**Description:** Implement Oathkeeper adapter for dynamic routing
+**Priority:** High
+**Complexity:** 10h
+
+**Dependencies:** P2-ORY-005
+
+**Acceptance Criteria:**
+- [ ] Dynamic rule creation per tenant
+- [ ] Host header-based routing
+- [ ] Tenant domain → tenant ID mapping
+- [ ] Rule templates for common patterns
+- [ ] Rule validation
+
+**Implementation:**
+```go
+func (a *OathkeeperAdapter) CreateRule(ctx context.Context, rule *AccessRule) error {
+    oathkeeperRule := &oathkeeper.Rule{
+        Id: rule.ID,
+        Match: &oathkeeper.RuleMatch{
+            Methods: []string{"GET", "POST", "PUT", "DELETE"},
+            Url:     fmt.Sprintf("https://%s/<.*>", rule.Match.Host),
+        },
+        Authenticators: []oathkeeper.RuleHandler{{Handler: "cookie_session"}},
+        Authorizer:     &oathkeeper.RuleHandler{Handler: "keto_engine_acp_ory"},
+        Mutators:       []oathkeeper.RuleHandler{{Handler: "id_token"}},
+        Upstream: &oathkeeper.Upstream{
+            Url: rule.Upstream.URL,
+        },
+    }
+
+    return a.client.CreateRule(ctx, oathkeeperRule)
+}
+```
+
+---
+
+### Task 2.7: Identity Schema Configuration
+
+**Task ID:** P2-ORY-007
+**Description:** Configure Kratos identity schemas for tenant isolation
+**Priority:** Medium
+**Complexity:** 6h
+
+**Dependencies:** P2-ORY-002
+
+**Acceptance Criteria:**
+- [ ] Base identity schema with tenant metadata
+- [ ] Schema versioning support
+- [ ] Custom trait validation
+- [ ] Schema migration scripts
+- [ ] Documentation
+
+**Implementation:**
+```json
+{
+  "$id": "https://finaegis.com/schemas/identity.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "FinAegis Identity",
+  "type": "object",
+  "properties": {
+    "traits": {
+      "type": "object",
+      "properties": {
+        "email": {"type": "string", "format": "email"},
+        "name": {"type": "string"},
+        "phone": {"type": "string"},
+        "tenant_id": {"type": "string", "format": "uuid"}
+      },
+      "required": ["email", "tenant_id"]
+    }
+  }
+}
+```
+
+---
+
+### Task 2.8: Permission Model Design
+
+**Task ID:** P2-ORY-008
+**Description:** Design Keto permission model with namespaces and relations
+**Priority:** High
+**Complexity:** 10h
+
+**Dependencies:** P2-ORY-004
+
+**Acceptance Criteria:**
+- [ ] Namespace configuration per tenant
+- [ ] Relation definitions (owner, admin, member, viewer)
+- [ ] Subject sets for hierarchical permissions
+- [ ] Permission inheritance rules
+- [ ] Migration from existing RBAC
+
+**Implementation:**
+```yaml
+# keto namespace config
+namespaces:
+  - name: tenant_123_finaegis
+    relations:
+      - name: owner
+        subject_set_relation: ""
+      - name: admin
+        subject_set_relation: ""
+      - name: member
+        subject_set_relation: ""
+      - name: viewer
+        subject_set_relation: ""
+      - name: can_read
+        subject_set_relation: "viewer,member,admin,owner"
+      - name: can_write
+        subject_set_relation: "member,admin,owner"
+      - name: can_delete
+        subject_set_relation: "admin,owner"
+```
+
+---
+
+### Task 2.9: Ory Stack Integration Testing
+
+**Task ID:** P2-ORY-009
+**Description:** Integration tests for Ory adapters
+**Priority:** High
+**Complexity:** 12h
+
+**Dependencies:** P2-ORY-002, P2-ORY-004, P2-ORY-006
+
+**Acceptance Criteria:**
+- [ ] Kratos adapter integration tests
+- [ ] Keto adapter integration tests
+- [ ] Oathkeeper routing tests
+- [ ] Multi-tenant isolation tests
+- [ ] Error handling tests
+
+**Implementation:**
+```go
+func TestKratosAdapter_Integration(t *testing.T) {
+    adapter := setupKratosAdapter(t)
+    ctx := context.Background()
+
+    // Create identity
+    identity, err := adapter.CreateIdentity(ctx, "tenant-123", map[string]interface{}{
+        "email": "test@example.com",
+        "name":  "Test User",
+    })
+    require.NoError(t, err)
+    assert.NotEmpty(t, identity.ID)
+
+    // Get identity
+    retrieved, err := adapter.GetIdentity(ctx, "tenant-123", identity.ID)
+    require.NoError(t, err)
+    assert.Equal(t, identity.ID, retrieved.ID)
+
+    // Delete identity
+    err = adapter.DeleteIdentity(ctx, "tenant-123", identity.ID)
+    require.NoError(t, err)
+}
+```
+
+---
+
+### Task 2.10: Tenant-Scoped Kratos Realms
+
+**Task ID:** P2-ORY-010
+**Description:** Configure per-tenant Kratos realms for identity isolation
+**Priority:** High
+**Complexity:** 10h
+
+**Dependencies:** P2-ORY-002, P1-CONTROL-001
+
+**Acceptance Criteria:**
+- [ ] Realm provisioning workflow
+- [ ] Per-tenant Kratos configuration
+- [ ] Realm-scoped identity queries
+- [ ] Realm deletion on tenant cleanup
+- [ ] Realm migration tools
+
+**Implementation:**
+```go
+func (s *TenantService) ProvisionKratosRealm(ctx context.Context, tenantID string) error {
+    config := &KratosRealmConfig{
+        Name:   fmt.Sprintf("tenant_%s", tenantID),
+        SelfServiceFlows: &SelfServiceConfig{
+            RegistrationEnabled: true,
+            RecoveryEnabled:     true,
+        },
+        IdentitySchemas: []string{"default"},
+    }
+
+    realm, err := s.kratosAdmin.CreateRealm(ctx, config)
+    if err != nil {
+        return err
+    }
+
+    // Store realm ID in tenant record
+    return s.repo.UpdateTenant(ctx, tenantID, map[string]interface{}{
+        "kratos_realm_id": realm.ID,
+    })
+}
+```
+
+---
+
+### Task 2.11: Keto Namespace Per Tenant
+
+**Task ID:** P2-ORY-011
+**Description:** Configure per-tenant Keto namespaces for authorization isolation
+**Priority:** High
+**Complexity:** 10h
+
+**Dependencies:** P2-ORY-004, P1-CONTROL-001
+
+**Acceptance Criteria:**
+- [ ] Namespace provisioning workflow
+- [ ] Namespace prefix validation
+- [ ] Tenant-scoped relation tuples
+- [ ] Namespace deletion on tenant cleanup
+- [ ] Cross-namespace query prevention
+
+**Implementation:**
+```go
+func (s *TenantService) ProvisionKetoNamespace(ctx context.Context, tenantID string) error {
+    namespace := fmt.Sprintf("tenant_%s_finaegis", tenantID)
+
+    config := &KetoNamespaceConfig{
+        Name: namespace,
+        Relations: []RelationConfig{
+            {Name: "owner"},
+            {Name: "admin"},
+            {Name: "member"},
+            {Name: "viewer"},
+        },
+    }
+
+    err := s.ketoAdmin.CreateNamespace(ctx, config)
+    if err != nil {
+        return err
+    }
+
+    return s.repo.UpdateTenant(ctx, tenantID, map[string]interface{}{
+        "keto_namespace_prefix": namespace,
+    })
+}
+```
+
+---
+
+### Task 2.12: Oathkeeper Routing Rules Per Tenant
+
+**Task ID:** P2-ORY-012
+**Description:** Configure dynamic Oathkeeper rules for tenant routing
+**Priority:** High
+**Complexity:** 10h
+
+**Dependencies:** P2-ORY-006, P1-CONTROL-001
+
+**Acceptance Criteria:**
+- [ ] Rule creation on tenant activation
+- [ ] Host header → tenant ID mapping
+- [ ] Upstream routing to tenant-plane
+- [ ] Rule deletion on tenant deletion
+- [ ] Rule validation and testing
+
+**Implementation:**
+```go
+func (s *TenantService) ConfigureOathkeeperRule(ctx context.Context, tenant *Tenant) error {
+    rule := &AccessRule{
+        ID: fmt.Sprintf("tenant_%s_api", tenant.ID),
+        Match: &Match{
+            Host:    tenant.Domain,
+            Methods: []string{"*"},
+            Path:    "/<.*>",
+        },
+        Authenticators: []Authenticator{
+            {Handler: "cookie_session"},
+        },
+        Authorizer: &Authorizer{
+            Handler: "keto_engine_acp_ory",
+            Config: map[string]interface{}{
+                "required_permission": "can_access",
+                "subject":             "identity.id",
+            },
+        },
+        Upstream: &Upstream{
+            URL: fmt.Sprintf("http://tenant-plane:8081?tenant=%s", tenant.ID),
+        },
+    }
+
+    return s.oathkeeper.CreateRule(ctx, rule)
+}
+```
+
+---
+
 ## Phase 3: Formance Integration
 
 **Duration:** Weeks 8-10 (2.5 weeks)
@@ -1089,6 +1953,495 @@ func TestTenantService_GetByDomain(t *testing.T) {
 
 ---
 
+
+
+### Task 3.1: Formance Ledger Service Interface
+
+**Task ID:** P3-FORMANCE-001
+**Description:** Define LedgerService hexagonal port for ledger abstraction
+**Priority:** Critical
+**Complexity:** 10h
+
+**Dependencies:** P0-INFRA-003
+
+**Acceptance Criteria:**
+- [ ] LedgerService interface with transaction operations
+- [ ] Multi-ledger support (one per tenant)
+- [ ] Transaction posting with metadata
+- [ ] Balance queries
+- [ ] Mock adapter for testing
+
+**Implementation:**
+```go
+type LedgerService interface {
+    CreateLedger(ctx context.Context, tenantID, name string) (*Ledger, error)
+    PostTransaction(ctx context.Context, ledgerID string, tx *Transaction) (*TransactionResult, error)
+    GetBalance(ctx context.Context, ledgerID, account string) (*Balance, error)
+    ListTransactions(ctx context.Context, ledgerID string, filter *TxFilter) ([]*Transaction, error)
+    RevertTransaction(ctx context.Context, ledgerID, txID string) error
+}
+
+type Transaction struct {
+    Reference string
+    Postings  []Posting
+    Metadata  map[string]interface{}
+}
+
+type Posting struct {
+    Source      string
+    Destination string
+    Amount      int64
+    Asset       string
+}
+```
+
+---
+
+### Task 3.2: Formance Ledger Adapter Implementation
+
+**Task ID:** P3-FORMANCE-002
+**Description:** Implement Formance Ledger adapter with double-entry bookkeeping
+**Priority:** Critical
+**Complexity:** 14h
+
+**Dependencies:** P3-FORMANCE-001
+
+**Acceptance Criteria:**
+- [ ] Formance API integration
+- [ ] Transaction posting with idempotency
+- [ ] Ledger isolation per tenant
+- [ ] Error handling and retry logic
+- [ ] Transaction reversal support
+
+**Implementation:**
+```go
+type FormanceLedgerAdapter struct {
+    client *formance.APIClient
+}
+
+func (a *FormanceLedgerAdapter) PostTransaction(ctx context.Context, ledgerID string, tx *Transaction) (*TransactionResult, error) {
+    postings := make([]formance.Posting, len(tx.Postings))
+    for i, p := range tx.Postings {
+        postings[i] = formance.Posting{
+            Source:      p.Source,
+            Destination: p.Destination,
+            Amount:      formance.NewMonetary(p.Amount, p.Asset),
+        }
+    }
+
+    script := &formance.Script{
+        Plain: generateNumscriptFromPostings(postings),
+        Vars:  tx.Metadata,
+    }
+
+    result, resp, err := a.client.TransactionsAPI.CreateTransaction(ctx, ledgerID).
+        PostTransaction(formance.PostTransaction{
+            Postings:  postings,
+            Reference: &tx.Reference,
+            Metadata:  &tx.Metadata,
+        }).
+        Execute()
+
+    if err != nil {
+        return nil, mapFormanceError(err, resp)
+    }
+
+    return &TransactionResult{
+        ID:        result.Data.Txid,
+        Timestamp: result.Data.Timestamp,
+    }, nil
+}
+```
+
+---
+
+### Task 3.3: Formance Wallets Service Interface
+
+**Task ID:** P3-FORMANCE-003
+**Description:** Define WalletService hexagonal port for wallet operations
+**Priority:** Critical
+**Complexity:** 8h
+
+**Dependencies:** P0-INFRA-003
+
+**Acceptance Criteria:**
+- [ ] WalletService interface with credit/debit operations
+- [ ] Multi-asset wallet support
+- [ ] Balance holds
+- [ ] Wallet metadata management
+- [ ] Mock adapter
+
+**Implementation:**
+```go
+type WalletService interface {
+    CreateWallet(ctx context.Context, tenantID, name string, metadata map[string]interface{}) (string, error)
+    Credit(ctx context.Context, walletID string, amount *Monetary, metadata map[string]interface{}) (*Transaction, error)
+    Debit(ctx context.Context, walletID string, amount *Monetary, metadata map[string]interface{}) (*Transaction, error)
+    GetBalance(ctx context.Context, walletID string) (*Balance, error)
+    Hold(ctx context.Context, walletID string, amount *Monetary) (*Hold, error)
+    ReleaseHold(ctx context.Context, holdID string) error
+}
+
+type Monetary struct {
+    Amount   int64
+    Currency string
+}
+```
+
+---
+
+### Task 3.4: Formance Wallets Adapter Implementation
+
+**Task ID:** P3-FORMANCE-004
+**Description:** Implement Formance Wallets adapter with multi-asset support
+**Priority:** Critical
+**Complexity:** 12h
+
+**Dependencies:** P3-FORMANCE-003
+
+**Acceptance Criteria:**
+- [ ] Wallet CRUD operations
+- [ ] Credit/debit with idempotency
+- [ ] Multi-asset balance management
+- [ ] Hold/release operations
+- [ ] Transaction history queries
+
+**Implementation:**
+```go
+type FormanceWalletAdapter struct {
+    client *formance.APIClient
+}
+
+func (a *FormanceWalletAdapter) Credit(ctx context.Context, walletID string, amount *Monetary, metadata map[string]interface{}) (*Transaction, error) {
+    req := &formance.CreditWalletRequest{
+        Amount: &formance.Monetary{
+            Asset:  amount.Currency,
+            Amount: big.NewInt(amount.Amount),
+        },
+        Metadata: metadata,
+    }
+
+    result, resp, err := a.client.WalletsAPI.CreditWallet(ctx, walletID).
+        CreditWalletRequest(*req).
+        Execute()
+
+    if err != nil {
+        return nil, mapFormanceError(err, resp)
+    }
+
+    return &Transaction{
+        ID:       result.Data.Id,
+        WalletID: walletID,
+        Amount:   amount,
+        Type:     "credit",
+    }, nil
+}
+```
+
+---
+
+### Task 3.5: Formance Ledger Per Tenant Provisioning
+
+**Task ID:** P3-FORMANCE-005
+**Description:** Provision dedicated Formance ledger instance per tenant
+**Priority:** High
+**Complexity:** 10h
+
+**Dependencies:** P3-FORMANCE-002, P1-CONTROL-001
+
+**Acceptance Criteria:**
+- [ ] Ledger creation workflow
+- [ ] Ledger configuration per tenant
+- [ ] Chart of accounts initialization
+- [ ] Ledger deletion on tenant cleanup
+- [ ] Ledger migration tools
+
+**Implementation:**
+```go
+func (s *TenantService) ProvisionFormanceLedger(ctx context.Context, tenantID string) error {
+    ledgerName := fmt.Sprintf("ledger-tenant-%s", tenantID)
+
+    ledger, err := s.formanceLedger.CreateLedger(ctx, tenantID, ledgerName)
+    if err != nil {
+        return err
+    }
+
+    // Initialize chart of accounts
+    accounts := []string{
+        "world",           // External source/sink
+        "bank:assets",     // Customer assets
+        "bank:liabilities", // Customer liabilities
+        "fees:revenue",    // Fee revenue
+    }
+
+    for _, account := range accounts {
+        if err := s.formanceLedger.CreateAccount(ctx, ledger.ID, account); err != nil {
+            return err
+        }
+    }
+
+    return s.repo.UpdateTenant(ctx, tenantID, map[string]interface{}{
+        "formance_ledger_id": ledger.ID,
+    })
+}
+```
+
+---
+
+### Task 3.6: Formance Wallets Per Tenant Provisioning
+
+**Task ID:** P3-FORMANCE-006
+**Description:** Configure Formance Wallets service per tenant
+**Priority:** High
+**Complexity:** 8h
+
+**Dependencies:** P3-FORMANCE-004, P1-CONTROL-001
+
+**Acceptance Criteria:**
+- [ ] Wallets service configuration
+- [ ] Per-tenant wallet pools
+- [ ] Default wallet creation
+- [ ] Wallet cleanup on tenant deletion
+- [ ] Wallet migration tools
+
+**Implementation:**
+```go
+func (s *AccountService) ProvisionDefaultWallet(ctx context.Context, tenantID, accountID string) (string, error) {
+    walletName := fmt.Sprintf("wallet-%s-default", accountID)
+
+    walletID, err := s.walletService.CreateWallet(ctx, tenantID, walletName, map[string]interface{}{
+        "account_id": accountID,
+        "type":       "default",
+    })
+
+    if err != nil {
+        return "", err
+    }
+
+    // Link wallet to account in domain
+    if err := s.accountRepo.LinkWallet(ctx, accountID, walletID); err != nil {
+        return "", err
+    }
+
+    return walletID, nil
+}
+```
+
+---
+
+### Task 3.7: Numscript Transaction Scripts
+
+**Task ID:** P3-FORMANCE-007
+**Description:** Create Numscript templates for common transactions
+**Priority:** Medium
+**Complexity:** 10h
+
+**Dependencies:** P3-FORMANCE-002
+
+**Acceptance Criteria:**
+- [ ] Deposit script template
+- [ ] Withdrawal script template
+- [ ] Transfer script template
+- [ ] Fee collection script
+- [ ] Script validation
+
+**Implementation:**
+```numscript
+// Deposit script
+vars {
+  account $account
+  monetary $amount
+}
+
+send $amount (
+  source = @world
+  destination = $account
+)
+
+// Withdrawal script
+vars {
+  account $account
+  monetary $amount
+}
+
+send $amount (
+  source = $account
+  destination = @world
+)
+
+// Transfer with fee
+vars {
+  account $from
+  account $to
+  monetary $amount
+  monetary $fee
+}
+
+send $amount (
+  source = $from
+  destination = $to
+)
+
+send $fee (
+  source = $from
+  destination = @fees:revenue
+)
+```
+
+---
+
+### Task 3.8: Formance Event Streaming Integration
+
+**Task ID:** P3-FORMANCE-008
+**Description:** Integrate Formance event streams with domain event bus
+**Priority:** Medium
+**Complexity:** 10h
+
+**Dependencies:** P3-FORMANCE-002, P0-INFRA-006
+
+**Acceptance Criteria:**
+- [ ] Formance webhook receiver
+- [ ] Event mapping to domain events
+- [ ] Event publishing to Redis streams
+- [ ] Event replay capability
+- [ ] Dead letter queue
+
+**Implementation:**
+```go
+type FormanceEventHandler struct {
+    eventBus *redis.EventBus
+}
+
+func (h *FormanceEventHandler) HandleWebhook(ctx context.Context, event *FormanceEvent) error {
+    switch event.Type {
+    case "COMMITTED_TRANSACTIONS":
+        return h.handleTransactionCommitted(ctx, event)
+    case "SAVED_METADATA":
+        return h.handleMetadataUpdated(ctx, event)
+    default:
+        return nil
+    }
+}
+
+func (h *FormanceEventHandler) handleTransactionCommitted(ctx context.Context, event *FormanceEvent) error {
+    tx := event.Data.(*TransactionCommitted)
+
+    domainEvent := &TransactionPostedEvent{
+        TenantID:    extractTenantID(tx.Metadata),
+        LedgerID:    event.LedgerID,
+        TransactionID: tx.TxID,
+        Postings:    tx.Postings,
+        Timestamp:   tx.Timestamp,
+    }
+
+    return h.eventBus.Publish(ctx, domainEvent.TenantID, "transaction.posted", domainEvent)
+}
+```
+
+---
+
+### Task 3.9: Formance API Error Handling
+
+**Task ID:** P3-FORMANCE-009
+**Description:** Implement comprehensive error handling for Formance APIs
+**Priority:** High
+**Complexity:** 8h
+
+**Dependencies:** P3-FORMANCE-002, P3-FORMANCE-004
+
+**Acceptance Criteria:**
+- [ ] Error mapping to domain errors
+- [ ] Retry logic with circuit breaker
+- [ ] Idempotency key management
+- [ ] Rate limit handling
+- [ ] Detailed error logging
+
+**Implementation:**
+```go
+func mapFormanceError(err error, resp *http.Response) error {
+    if resp == nil {
+        return &DomainError{Code: "FORMANCE_UNAVAILABLE", Message: err.Error()}
+    }
+
+    switch resp.StatusCode {
+    case 409:
+        return &DomainError{Code: "CONFLICT", Message: "Transaction already exists"}
+    case 400:
+        return &DomainError{Code: "INVALID_TRANSACTION", Message: err.Error()}
+    case 429:
+        return &DomainError{Code: "RATE_LIMIT", Message: "Rate limit exceeded", Retryable: true}
+    case 500, 502, 503, 504:
+        return &DomainError{Code: "FORMANCE_ERROR", Message: err.Error(), Retryable: true}
+    default:
+        return &DomainError{Code: "UNKNOWN_ERROR", Message: err.Error()}
+    }
+}
+
+func withRetry(ctx context.Context, fn func() error) error {
+    return retry.Do(
+        fn,
+        retry.Attempts(3),
+        retry.Delay(time.Second),
+        retry.DelayType(retry.BackOffDelay),
+        retry.RetryIf(func(err error) bool {
+            if domainErr, ok := err.(*DomainError); ok {
+                return domainErr.Retryable
+            }
+            return false
+        }),
+    )
+}
+```
+
+---
+
+### Task 3.10: Formance Integration Testing
+
+**Task ID:** P3-FORMANCE-010
+**Description:** Integration tests for Formance adapters
+**Priority:** High
+**Complexity:** 10h
+
+**Dependencies:** P3-FORMANCE-002, P3-FORMANCE-004
+
+**Acceptance Criteria:**
+- [ ] Ledger adapter integration tests
+- [ ] Wallet adapter integration tests
+- [ ] Transaction posting tests
+- [ ] Multi-asset balance tests
+- [ ] Error handling tests
+
+**Implementation:**
+```go
+func TestFormanceLedgerAdapter_Integration(t *testing.T) {
+    adapter := setupFormanceLedgerAdapter(t)
+    ctx := context.Background()
+
+    // Create ledger
+    ledger, err := adapter.CreateLedger(ctx, "test-tenant", "test-ledger")
+    require.NoError(t, err)
+
+    // Post transaction
+    tx := &Transaction{
+        Reference: "test-001",
+        Postings: []Posting{
+            {Source: "world", Destination: "user:123", Amount: 10000, Asset: "USD"},
+        },
+        Metadata: map[string]interface{}{"type": "deposit"},
+    }
+
+    result, err := adapter.PostTransaction(ctx, ledger.ID, tx)
+    require.NoError(t, err)
+    assert.NotEmpty(t, result.ID)
+
+    // Get balance
+    balance, err := adapter.GetBalance(ctx, ledger.ID, "user:123")
+    require.NoError(t, err)
+    assert.Equal(t, int64(10000), balance.Amount)
+}
+```
+
+---
 
 ## Phase 4: Event Horizon Setup (Event Sourcing for Non-Financial Domains)
 
@@ -1757,6 +3110,377 @@ Each tenant gets isolated event tables:
 ---
 
 
+
+
+### Task 5.1: Tenant Context Extraction Middleware
+
+**Task ID:** P5-SCHEMA-001
+**Description:** Extract tenant ID from X-Tenant-ID header or domain
+**Priority:** Critical
+**Complexity:** 6h
+
+**Dependencies:** P1-CONTROL-003
+
+**Acceptance Criteria:**
+- [ ] Middleware extracts tenant ID from X-Tenant-ID header
+- [ ] Fallback to domain-based lookup
+- [ ] Tenant validation against registry
+- [ ] Context propagation to downstream handlers
+- [ ] Error handling for invalid tenants
+
+**Implementation:**
+```go
+type TenantContextMiddleware struct {
+    tenantService TenantService
+}
+
+func (m *TenantContextMiddleware) Handle(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        ctx := r.Context()
+
+        // Try X-Tenant-ID header first
+        tenantID := r.Header.Get("X-Tenant-ID")
+
+        // Fallback to domain lookup
+        if tenantID == "" {
+            domain := r.Host
+            tenant, err := m.tenantService.GetByDomain(ctx, domain)
+            if err != nil {
+                http.Error(w, "Tenant not found", http.StatusNotFound)
+                return
+            }
+            tenantID = tenant.ID.String()
+        }
+
+        // Validate tenant is active
+        tenant, err := m.tenantService.GetByID(ctx, tenantID)
+        if err != nil || tenant.Status != StatusActive {
+            http.Error(w, "Tenant not active", http.StatusForbidden)
+            return
+        }
+
+        // Add to context
+        ctx = context.WithValue(ctx, "tenant_id", tenantID)
+        ctx = context.WithValue(ctx, "tenant", tenant)
+
+        next.ServeHTTP(w, r.WithContext(ctx))
+    })
+}
+```
+
+---
+
+### Task 5.2: PostgreSQL Search Path Middleware
+
+**Task ID:** P5-SCHEMA-002
+**Description:** Set PostgreSQL search_path based on tenant context
+**Priority:** Critical
+**Complexity:** 8h
+
+**Dependencies:** P5-SCHEMA-001
+
+**Acceptance Criteria:**
+- [ ] Automatic SET search_path on DB connection
+- [ ] Connection pooling per tenant schema
+- [ ] Search path reset after request
+- [ ] Performance optimization
+- [ ] Connection leak prevention
+
+**Implementation:**
+```go
+type SchemaIsolationMiddleware struct {
+    db *gorm.DB
+}
+
+func (m *SchemaIsolationMiddleware) Handle(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        ctx := r.Context()
+        tenant := ctx.Value("tenant").(*Tenant)
+
+        // Create scoped DB session
+        scopedDB := m.db.WithContext(ctx).Session(&gorm.Session{})
+
+        // Set search path for this session
+        if err := scopedDB.Exec(fmt.Sprintf("SET search_path TO %s", tenant.SchemaName)).Error; err != nil {
+            http.Error(w, "Failed to set schema", http.StatusInternalServerError)
+            return
+        }
+
+        // Add scoped DB to context
+        ctx = context.WithValue(ctx, "db", scopedDB)
+
+        next.ServeHTTP(w, r.WithContext(ctx))
+
+        // Reset search path (optional, connection will be returned to pool)
+        scopedDB.Exec("RESET search_path")
+    })
+}
+```
+
+---
+
+### Task 5.3: Tenant-Scoped Database Connection Pool
+
+**Task ID:** P5-SCHEMA-003
+**Description:** Implement per-tenant connection pooling strategy
+**Priority:** High
+**Complexity:** 10h
+
+**Dependencies:** P5-SCHEMA-002
+
+**Acceptance Criteria:**
+- [ ] Connection pool per tenant schema
+- [ ] Pool size configuration
+- [ ] Connection lifetime management
+- [ ] Pool monitoring and metrics
+- [ ] Graceful pool shutdown
+
+**Implementation:**
+```go
+type TenantConnectionPool struct {
+    pools  map[string]*sql.DB
+    config *PoolConfig
+    mu     sync.RWMutex
+}
+
+func (p *TenantConnectionPool) GetConnection(tenantID string, schemaName string) (*sql.DB, error) {
+    p.mu.RLock()
+    pool, exists := p.pools[tenantID]
+    p.mu.RUnlock()
+
+    if exists {
+        return pool, nil
+    }
+
+    // Create new pool
+    p.mu.Lock()
+    defer p.mu.Unlock()
+
+    // Double-check after acquiring write lock
+    if pool, exists = p.pools[tenantID]; exists {
+        return pool, nil
+    }
+
+    dsn := fmt.Sprintf("%s?search_path=%s", p.config.BaseDSN, schemaName)
+    db, err := sql.Open("postgres", dsn)
+    if err != nil {
+        return nil, err
+    }
+
+    db.SetMaxOpenConns(p.config.MaxOpenConns)
+    db.SetMaxIdleConns(p.config.MaxIdleConns)
+    db.SetConnMaxLifetime(p.config.ConnMaxLifetime)
+
+    p.pools[tenantID] = db
+    return db, nil
+}
+```
+
+---
+
+### Task 5.4: Request-Level Tenant Context Propagation
+
+**Task ID:** P5-SCHEMA-004
+**Description:** Propagate tenant context through request lifecycle
+**Priority:** Medium
+**Complexity:** 6h
+
+**Dependencies:** P5-SCHEMA-001
+
+**Acceptance Criteria:**
+- [ ] Context helpers for tenant access
+- [ ] Tenant validation in all handlers
+- [ ] Goroutine-safe context propagation
+- [ ] Logging with tenant ID
+- [ ] Metrics tagged by tenant
+
+**Implementation:**
+```go
+type TenantContext struct {
+    TenantID   string
+    SchemaName string
+    Tenant     *Tenant
+}
+
+func GetTenantContext(ctx context.Context) (*TenantContext, error) {
+    tenant, ok := ctx.Value("tenant").(*Tenant)
+    if !ok {
+        return nil, errors.New("tenant not found in context")
+    }
+
+    return &TenantContext{
+        TenantID:   tenant.ID.String(),
+        SchemaName: tenant.SchemaName,
+        Tenant:     tenant,
+    }, nil
+}
+
+func MustGetTenantContext(ctx context.Context) *TenantContext {
+    tc, err := GetTenantContext(ctx)
+    if err != nil {
+        panic(err)
+    }
+    return tc
+}
+
+// Logger with tenant context
+func LoggerWithTenant(ctx context.Context, logger *zap.Logger) *zap.Logger {
+    if tc, err := GetTenantContext(ctx); err == nil {
+        return logger.With(
+            zap.String("tenant_id", tc.TenantID),
+            zap.String("schema", tc.SchemaName),
+        )
+    }
+    return logger
+}
+```
+
+---
+
+### Task 5.5: Cross-Tenant Query Prevention
+
+**Task ID:** P5-SCHEMA-005
+**Description:** Implement safeguards against cross-tenant data access
+**Priority:** Critical
+**Complexity:** 10h
+
+**Dependencies:** P5-SCHEMA-002
+
+**Acceptance Criteria:**
+- [ ] Query analysis for schema leaks
+- [ ] Circuit breaker for suspicious queries
+- [ ] Audit logging for all DB queries
+- [ ] Alerts for cross-tenant attempts
+- [ ] Integration tests
+
+**Implementation:**
+```go
+type QueryGuard struct {
+    logger *zap.Logger
+}
+
+func (g *QueryGuard) BeforeQuery(ctx context.Context, query string, args []interface{}) error {
+    tc, err := GetTenantContext(ctx)
+    if err != nil {
+        return errors.New("tenant context required")
+    }
+
+    // Check for global table access
+    forbiddenPatterns := []string{
+        "FROM tenants",
+        "FROM control_plane",
+        "FROM public.",
+    }
+
+    lowerQuery := strings.ToLower(query)
+    for _, pattern := range forbiddenPatterns {
+        if strings.Contains(lowerQuery, strings.ToLower(pattern)) {
+            g.logger.Error("Cross-tenant query attempt blocked",
+                zap.String("tenant_id", tc.TenantID),
+                zap.String("query", query),
+            )
+            return errors.New("cross-tenant query blocked")
+        }
+    }
+
+    // Log query
+    g.logger.Debug("Query executed",
+        zap.String("tenant_id", tc.TenantID),
+        zap.String("query", query),
+    )
+
+    return nil
+}
+```
+
+---
+
+### Task 5.6: Schema Isolation Integration Testing
+
+**Task ID:** P5-SCHEMA-006
+**Description:** Comprehensive tests for tenant isolation
+**Priority:** Critical
+**Complexity:** 8h
+
+**Dependencies:** P5-SCHEMA-001 through P5-SCHEMA-005
+
+**Acceptance Criteria:**
+- [ ] Multi-tenant data isolation tests
+- [ ] Concurrent request tests
+- [ ] Cross-tenant access prevention tests
+- [ ] Performance benchmarks
+- [ ] Stress tests
+
+**Implementation:**
+```go
+func TestSchemaIsolation_MultiTenant(t *testing.T) {
+    // Create two tenants
+    tenant1 := createTestTenant(t, "tenant1")
+    tenant2 := createTestTenant(t, "tenant2")
+
+    // Insert data for tenant1
+    ctx1 := context.WithValue(context.Background(), "tenant", tenant1)
+    db1 := getDB(ctx1)
+    db1.Create(&Account{Name: "Tenant1 Account"})
+
+    // Insert data for tenant2
+    ctx2 := context.WithValue(context.Background(), "tenant", tenant2)
+    db2 := getDB(ctx2)
+    db2.Create(&Account{Name: "Tenant2 Account"})
+
+    // Verify tenant1 cannot see tenant2 data
+    var accounts1 []Account
+    db1.Find(&accounts1)
+    assert.Len(t, accounts1, 1)
+    assert.Equal(t, "Tenant1 Account", accounts1[0].Name)
+
+    // Verify tenant2 cannot see tenant1 data
+    var accounts2 []Account
+    db2.Find(&accounts2)
+    assert.Len(t, accounts2, 1)
+    assert.Equal(t, "Tenant2 Account", accounts2[0].Name)
+}
+
+func TestSchemaIsolation_ConcurrentRequests(t *testing.T) {
+    tenants := [](*Tenant){
+        createTestTenant(t, "tenant1"),
+        createTestTenant(t, "tenant2"),
+        createTestTenant(t, "tenant3"),
+    }
+
+    var wg sync.WaitGroup
+    for i := 0; i < 100; i++ {
+        wg.Add(1)
+        go func(idx int) {
+            defer wg.Done()
+            tenant := tenants[idx%3]
+            ctx := context.WithValue(context.Background(), "tenant", tenant)
+
+            // Perform DB operations
+            db := getDB(ctx)
+            db.Create(&Account{Name: fmt.Sprintf("Account-%d", idx)})
+
+            var count int64
+            db.Model(&Account{}).Count(&count)
+            assert.Greater(t, count, int64(0))
+        }(i)
+    }
+
+    wg.Wait()
+
+    // Verify each tenant has correct number of accounts
+    for _, tenant := range tenants {
+        ctx := context.WithValue(context.Background(), "tenant", tenant)
+        db := getDB(ctx)
+
+        var count int64
+        db.Model(&Account{}).Count(&count)
+        assert.Equal(t, int64(33), count) // 100/3 = 33 per tenant (approximately)
+    }
+}
+```
+
+---
 
 ## Phase 6: Account Domain
 
