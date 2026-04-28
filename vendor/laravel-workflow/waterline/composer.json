@@ -1,0 +1,80 @@
+{
+    "name": "durable-workflow/waterline",
+    "description": "An elegant UI for monitoring Laravel Workflows.",
+    "license": "MIT",
+    "replace": {
+        "laravel-workflow/waterline": "self.version"
+    },
+    "authors": [
+        {
+            "name": "Richard McDaniel",
+            "email": "richard.lee.mcdaniel@gmail.com"
+        }
+    ],
+    "require": {
+        "php": "^8.0.2",
+        "illuminate/support": "^9.0|^10.0|^11.0|^12.0|^13.0",
+        "durable-workflow/workflow": "^1.0"
+    },
+    "require-dev": {
+        "fakerphp/faker": "^1.9.1",
+        "mockery/mockery": "^1.4.4",
+        "orchestra/testbench": "^7.29|^11.0",
+        "orchestra/workbench": "^7.29",
+        "phpunit/phpunit": "^9.5.10|^12.5.12"
+    },
+    "autoload": {
+        "psr-4": {
+            "Waterline\\": "app/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Waterline\\Tests\\": "tests/",
+            "Workbench\\App\\": "workbench/app/",
+            "Workbench\\Database\\Factories\\": "workbench/database/factories/",
+            "Workbench\\Database\\Seeders\\": "workbench/database/seeders/"
+        }
+    },
+    "scripts": {
+        "post-autoload-dump": [
+            "@clear",
+            "@prepare",
+            "@php ./vendor/bin/testbench package:discover --ansi"
+        ],
+        "serve": [
+            "Composer\\Config::disableProcessTimeout",
+            "@build",
+            "@php vendor/bin/testbench serve --ansi"
+        ],
+        "build": "@php vendor/bin/testbench workbench:build --ansi",
+        "test": "composer test-mssql && composer test-mysql && composer test-pgsql && composer test-sqlite",
+        "test-all": "composer test-mssql && composer test-mysql && composer test-pgsql && composer test-sqlite",
+        "test-mssql": "vendor/bin/phpunit --testdox --configuration=phpunit-mssql.xml",
+        "test-mysql": "vendor/bin/phpunit --testdox --configuration=phpunit-mysql.xml",
+        "test-pgsql": "vendor/bin/phpunit --testdox --configuration=phpunit-pgsql.xml",
+        "test-sqlite": "vendor/bin/phpunit --testdox --configuration=phpunit-sqlite.xml",
+        "clear": "@php vendor/bin/testbench package:purge-skeleton --ansi",
+        "prepare": "@php vendor/bin/testbench package:discover --ansi"
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Waterline\\WaterlineServiceProvider"
+            ],
+            "aliases": {
+                "Waterline": "Waterline\\Waterline"
+            }
+        }
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "preferred-install": "dist",
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}

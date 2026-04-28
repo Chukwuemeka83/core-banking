@@ -1,0 +1,17 @@
+{
+	"name": "Existing Docker Compose (Extend)",
+	"dockerComposeFile": [
+		"docker/docker-compose.yml"
+	],
+	"service": "laravel",
+	"runServices": [
+		"laravel",
+		"mysql",
+		"redis",
+		"pgsql",
+		"mssql"
+	],
+	"workspaceFolder": "/var/www/html",
+	"remoteUser": "laravel",
+	"forwardPorts": [18280]
+}

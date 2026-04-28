@@ -1,0 +1,32 @@
+{
+    "name": "eventsauce/object-hydrator",
+    "description": "Converts structured data into strict objects.",
+    "keywords": ["hydration", "mapper", "construction", "constructor"],
+    "license": "MIT",
+    "require": {
+        "php": "^8.0",
+        "ext-fileinfo": "*"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.5.11",
+        "ramsey/uuid": "^4.2",
+        "friendsofphp/php-cs-fixer": "^3.4",
+        "phpbench/phpbench": "^1.2",
+        "league/construct-finder": "^1.1",
+        "phpstan/phpstan": "^1.7"
+    },
+    "suggest": {
+        "league/construct-finder": "Find all classes in a directory for the best dumped hydrators."
+    },
+    "autoload": {
+        "psr-4": {
+            "EventSauce\\ObjectHydrator\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Frank de Jonge",
+            "email": "info@frankdejonge.nl"
+        }
+    ]
+}

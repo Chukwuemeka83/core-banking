@@ -1,0 +1,34 @@
+name: workflow
+
+version: "3"
+services:
+  app:
+    build: ./docker/app
+    volumes:
+      - ../:/workspace:cached
+    ports:
+      - ${WORKFLOW_APP_PORT:-18180}:80
+    tty: true
+    environment:
+        APP_ENV: local
+        PHP_EXTENSION_XDEBUG: 1
+        PHP_EXTENSION_PGSQL: 1
+        PHP_EXTENSION_PDO_PGSQL: 1
+        APACHE_DOCUMENT_ROOT: /workspace/public
+  db:
+    image: postgres:13
+    restart: unless-stopped
+    ports:
+        - ${WORKFLOW_DB_PORT:-15432}:5432
+    environment:
+        POSTGRES_DB: laravel
+        POSTGRES_USER: laravel
+        POSTGRES_PASSWORD: laravel
+  redis:
+    image: redis:6-alpine
+    ports:
+      - ${WORKFLOW_REDIS_PORT:-16380}:6379
+  mailhog:
+    image: mailhog/mailhog
+    ports:
+      - ${WORKFLOW_MAILHOG_PORT:-18025}:8025
