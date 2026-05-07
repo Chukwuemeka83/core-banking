@@ -1,19 +1,3 @@
-# Database Schema Documentation
-
-**Version:** 1.3  
-**Last Updated:** 2024-06-27  
-**Laravel Version:** 11.x  
-**Database:** MySQL 8.0+
-
-## Overview
-
-FinAegis uses a sophisticated database schema designed to support multi-asset banking operations with event sourcing, comprehensive audit trails, and high-performance queries. The schema follows Domain-Driven Design principles with clear separation between different business domains.
-
-## Core Banking Tables
-
-### users
-Primary user accounts for the banking platform.
-
 ```sql
 CREATE TABLE `users` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -30,14 +14,6 @@ CREATE TABLE `users` (
   UNIQUE KEY `users_email_unique` (`email`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
-
-**Indexes:**
-- Primary key on `id`
-- Unique index on `uuid` (used for external references)
-- Unique index on `email` (authentication)
-
-### accounts
-Banking accounts owned by users. Each user can have multiple accounts.
 
 ```sql
 CREATE TABLE `accounts` (
@@ -56,21 +32,6 @@ CREATE TABLE `accounts` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-**Fields:**
-- `balance`: Legacy USD balance in cents (maintained for backward compatibility)
-- `status`: 'active', 'frozen', 'closed'
-
-**Indexes:**
-- Primary key on `id`
-- Unique index on `uuid`
-- Index on `user_uuid` (foreign key reference)
-- Index on `status` (for filtering)
-
-## Multi-Asset Support
-
-### assets
-Supported assets (currencies, cryptocurrencies, commodities).
-
 ```sql
 CREATE TABLE `assets` (
   `code` varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -87,20 +48,6 @@ CREATE TABLE `assets` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-**Fields:**
-- `code`: Primary key (e.g., 'USD', 'EUR', 'BTC', 'XAU')
-- `type`: Asset category for different handling logic
-- `precision`: Decimal places for display (2 for fiat, 8 for crypto)
-- `metadata`: JSON field for extensible asset properties
-
-**Default Assets:**
-- USD, EUR, GBP (fiat currencies)
-- BTC, ETH (cryptocurrencies)
-- XAU, XAG (precious metals)
-
-### account_balances
-Multi-asset balances for each account.
-
 ```sql
 CREATE TABLE `account_balances` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -116,17 +63,6 @@ CREATE TABLE `account_balances` (
   CONSTRAINT `account_balances_asset_code_foreign` FOREIGN KEY (`asset_code`) REFERENCES `assets` (`code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
-
-**Fields:**
-- `balance`: Amount in smallest unit (cents for USD, satoshis for BTC)
-
-**Constraints:**
-- Unique constraint on (account_uuid, asset_code) - one balance per asset per account
-- Foreign key to accounts table with CASCADE delete
-- Foreign key to assets table
-
-### exchange_rates
-Exchange rates between different assets.
 
 ```sql
 CREATE TABLE `exchange_rates` (
@@ -151,22 +87,6 @@ CREATE TABLE `exchange_rates` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-**Fields:**
-- `rate`: Exchange rate with 8 decimal precision
-- `source`: 'manual', 'api', 'oracle', 'market'
-- `fetched_at`: When the rate was obtained
-- `expires_at`: Rate expiration (NULL for permanent rates)
-
-**Indexes:**
-- Unique constraint on (from_asset, to_asset, fetched_at) for historical tracking
-- Composite index on (from_asset, to_asset) for rate lookups
-- Index on fetched_at for time-based queries
-
-## Event Sourcing
-
-### stored_events
-Core event sourcing table storing all domain events.
-
 ```sql
 CREATE TABLE `stored_events` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -185,19 +105,6 @@ CREATE TABLE `stored_events` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-**Event Types:**
-- Account events: `AccountCreated`, `MoneyAdded`, `MoneySubtracted`
-- Asset events: `AssetBalanceAdded`, `AssetBalanceSubtracted`, `AssetTransferred`
-- Transfer events: `MoneyTransferred`, `TransferInitiated`, `TransferCompleted`
-
-**Indexes:**
-- Unique constraint on (aggregate_uuid, aggregate_version) for consistency
-- Index on aggregate_uuid for aggregate reconstruction
-- Index on event_class for event type queries
-
-### snapshots
-Event sourcing snapshots for performance optimization.
-
 ```sql
 CREATE TABLE `snapshots` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -210,11 +117,6 @@ CREATE TABLE `snapshots` (
   KEY `snapshots_aggregate_version_index` (`aggregate_version`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
-
-## Read Models & Projections
-
-### turnovers
-Turnover projections for account activity analysis.
 
 ```sql
 CREATE TABLE `turnovers` (
@@ -230,16 +132,6 @@ CREATE TABLE `turnovers` (
   KEY `turnovers_period_index` (`period`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
-
-**Fields:**
-- `debit`: Total debit amount for the period (in cents)
-- `credit`: Total credit amount for the period (in cents)
-- `period`: Date for daily aggregation
-
-## Governance System
-
-### polls
-Democratic governance polls for platform decisions.
 
 ```sql
 CREATE TABLE `polls` (
@@ -267,19 +159,6 @@ CREATE TABLE `polls` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-**Poll Types:**
-- 'single_choice': Select one option
-- 'multiple_choice': Select multiple options
-- 'weighted': Weighted voting based on holdings
-
-**Voting Power Strategies:**
-- 'one_user_one_vote': Equal voting power
-- 'asset_weighted': Voting power based on asset holdings
-- 'sqrt_weighted': Square root of asset holdings
-
-### votes
-Individual votes cast on polls.
-
 ```sql
 CREATE TABLE `votes` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -299,15 +178,6 @@ CREATE TABLE `votes` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-**Constraints:**
-- Unique constraint on (poll_id, user_uuid) - one vote per user per poll
-- Foreign key to polls with CASCADE delete
-
-## Webhook System
-
-### webhooks
-Webhook endpoints for external integrations.
-
 ```sql
 CREATE TABLE `webhooks` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -325,15 +195,6 @@ CREATE TABLE `webhooks` (
   KEY `webhooks_is_active_index` (`is_active`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
-
-**Supported Events:**
-- Account: created, updated, frozen, unfrozen, closed
-- Transaction: created, reversed
-- Transfer: created, completed, failed
-- Balance: low_balance, negative_balance
-
-### webhook_deliveries
-Webhook delivery tracking and retry logic.
 
 ```sql
 CREATE TABLE `webhook_deliveries` (
@@ -358,17 +219,6 @@ CREATE TABLE `webhook_deliveries` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-**Delivery Status:**
-- 'pending': Awaiting delivery
-- 'success': Successfully delivered
-- 'failed': All retry attempts exhausted
-- 'retrying': Waiting for next retry
-
-## Platform Configuration
-
-### settings
-Platform-wide configuration settings with encryption support.
-
 ```sql
 CREATE TABLE `settings` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -385,25 +235,6 @@ CREATE TABLE `settings` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-**Fields:**
-- `key`: Unique setting identifier (e.g., 'platform.name', 'features.lending.enabled')
-- `value`: Setting value (encrypted if sensitive)
-- `type`: Data type (string, boolean, integer, json, array)
-- `is_encrypted`: Whether the value is encrypted
-- `description`: Human-readable description of the setting
-
-**Usage:**
-- Platform configuration (name, URL, timezone)
-- Feature toggles for sub-products
-- API rate limits and thresholds
-- Email templates and notifications
-- Third-party service credentials (encrypted)
-
-## Laravel Framework Tables
-
-### migrations
-Laravel migration tracking.
-
 ```sql
 CREATE TABLE `migrations` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
@@ -412,9 +243,6 @@ CREATE TABLE `migrations` (
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
-
-### failed_jobs
-Failed queue jobs for retry and debugging.
 
 ```sql
 CREATE TABLE `failed_jobs` (
@@ -430,9 +258,6 @@ CREATE TABLE `failed_jobs` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-### cache
-Cache table for database-backed caching.
-
 ```sql
 CREATE TABLE `cache` (
   `key` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -441,9 +266,6 @@ CREATE TABLE `cache` (
   PRIMARY KEY (`key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
-
-### personal_access_tokens
-Laravel Sanctum API tokens.
 
 ```sql
 CREATE TABLE `personal_access_tokens` (
@@ -462,18 +284,6 @@ CREATE TABLE `personal_access_tokens` (
   KEY `personal_access_tokens_tokenable_type_tokenable_id_index` (`tokenable_type`,`tokenable_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
-
-## Performance Considerations
-
-### Indexing Strategy
-
-1. **Primary Keys**: All tables use `bigint unsigned AUTO_INCREMENT`
-2. **UUIDs**: Indexed for external references and API lookups
-3. **Foreign Keys**: Proper indexing for joins and cascading operations
-4. **Time-based Queries**: Indexes on created_at, fetched_at, etc.
-5. **Composite Indexes**: Multi-column indexes for complex queries
-
-### Query Optimization
 
 ```sql
 -- Efficient account balance retrieval
@@ -495,46 +305,3 @@ WHERE aggregate_uuid = ?
 AND event_class IN (?)
 ORDER BY aggregate_version DESC;
 ```
-
-### Partitioning Strategy
-
-For high-volume deployments, consider partitioning:
-
-1. **stored_events**: Partition by created_at (monthly)
-2. **webhook_deliveries**: Partition by created_at (weekly)
-3. **turnovers**: Partition by period (yearly)
-
-## Data Integrity
-
-### Constraints and Validations
-
-1. **Foreign Key Constraints**: Enforce referential integrity
-2. **Unique Constraints**: Prevent duplicate records
-3. **Check Constraints**: Validate data ranges and formats
-4. **JSON Schema Validation**: Validate JSON field structures
-
-### Backup Strategy
-
-1. **Daily Backups**: Full database backup with 30-day retention
-2. **Point-in-Time Recovery**: Binary log enabled for recovery
-3. **Testing**: Regular restore testing on staging environment
-
-## Security Considerations
-
-### Data Protection
-
-1. **Encryption at Rest**: Database-level encryption for sensitive data
-2. **Access Control**: Role-based database user permissions
-3. **Audit Logging**: Enable MySQL audit plugin for compliance
-4. **Connection Security**: TLS encryption for all connections
-
-### Sensitive Data Handling
-
-- **Passwords**: Bcrypt hashed in users table
-- **API Tokens**: Hashed in personal_access_tokens
-- **Webhook Secrets**: Encrypted before storage
-- **PII Data**: Minimal storage, encryption where required
-
----
-
-This schema supports FinAegis's evolution from single-currency to multi-asset platform while maintaining ACID compliance, performance, and auditability requirements.
