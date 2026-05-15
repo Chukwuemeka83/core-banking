@@ -4,6 +4,7 @@ namespace App\Filament\Admin\Widgets;
 
 use App\Domain\Basket\Models\BasketAsset;
 use Filament\Widgets\Widget;
+use Illuminate\Support\Facades\Cache;
 
 class PrimaryBasketWidget extends Widget
 {
@@ -13,36 +14,57 @@ class PrimaryBasketWidget extends Widget
 
     protected static ?int $sort = 1;
 
+    protected static ?string $pollingInterval = null;
+
     public function getBasketData(): array
     {
-        $basket = BasketAsset::where('code', config('baskets.primary', 'PRIMARY'))->first();
+        return Cache::remember('admin_primary_basket_data', now()->addMinutes(15), function () {
+            try {
+                $basket = BasketAsset::where('code', config('baskets.primary', 'PRIMARY'))->first();
 
-        if (! $basket) {
-            return [
-                'exists'     => false,
-                'currencies' => [
-                    ['code' => 'USD', 'name' => 'US Dollar', 'weight' => 40],
-                    ['code' => 'EUR', 'name' => 'Euro', 'weight' => 30],
-                    ['code' => 'GBP', 'name' => 'British Pound', 'weight' => 15],
-                    ['code' => 'CHF', 'name' => 'Swiss Franc', 'weight' => 10],
-                    ['code' => 'JPY', 'name' => 'Japanese Yen', 'weight' => 3],
-                    ['code' => 'XAU', 'name' => 'Gold', 'weight' => 2],
-                ],
-            ];
-        }
-
-        return [
-            'exists'     => true,
-            'basket'     => $basket,
-            'currencies' => $basket->components()->with('asset')->get()->map(
-                function ($component) {
+                if (! $basket) {
                     return [
-                        'code'   => $component->asset_code,
-                        'name'   => $component->asset->name ?? $component->asset_code,
-                        'weight' => $component->weight,
+                        'exists'     => false,
+                        'currencies' => [
+                            ['code' => 'USD', 'name' => 'US Dollar', 'weight' => 40],
+                            ['code' => 'EUR', 'name' => 'Euro', 'weight' => 30],
+                            ['code' => 'GBP', 'name' => 'British Pound', 'weight' => 15],
+                            ['code' => 'CHF', 'name' => 'Swiss Franc', 'weight' => 10],
+                            ['code' => 'JPY', 'name' => 'Japanese Yen', 'weight' => 3],
+                            ['code' => 'XAU', 'name' => 'Gold', 'weight' => 2],
+                        ],
                     ];
                 }
-            )->toArray(),
-        ];
+
+                return [
+                    'exists'     => true,
+                    'basket'     => $basket,
+                    'currencies' => $basket->components()->with('asset')->get()->map(
+                        function ($component) {
+                            return [
+                                'code'   => $component->asset_code,
+                                'name'   => $component->asset->name ?? $component->asset_code,
+                                'weight' => $component->weight,
+                            ];
+                        }
+                    )->toArray(),
+                ];
+            } catch (\Exception $e) {
+                \Log::error('Error fetching primary basket data: ' . $e->getMessage());
+
+                // Return default fallback data
+                return [
+                    'exists'     => false,
+                    'currencies' => [
+                        ['code' => 'USD', 'name' => 'US Dollar', 'weight' => 40],
+                        ['code' => 'EUR', 'name' => 'Euro', 'weight' => 30],
+                        ['code' => 'GBP', 'name' => 'British Pound', 'weight' => 15],
+                        ['code' => 'CHF', 'name' => 'Swiss Franc', 'weight' => 10],
+                        ['code' => 'JPY', 'name' => 'Japanese Yen', 'weight' => 3],
+                        ['code' => 'XAU', 'name' => 'Gold', 'weight' => 2],
+                    ],
+                ];
+            }
+        });
     }
 }
